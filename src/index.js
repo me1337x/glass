@@ -28,6 +28,7 @@ const sessionRepository = require('./features/common/repositories/session');
 const modelStateService = require('./features/common/services/modelStateService');
 const featureBridge = require('./bridge/featureBridge');
 const windowBridge = require('./bridge/windowBridge');
+const brainBridge = require('./brain-bridge'); // WebSocket client to Python brain sidecar (S2)
 
 // Global variables
 const eventBridge = new EventEmitter();
@@ -218,8 +219,13 @@ app.whenReady().then(async () => {
         // Start web server and create windows ONLY after all initializations are successful
         WEB_PORT = await startWebStack();
         console.log('Web front-end listening on', WEB_PORT);
-        
+
         createWindows();
+
+        // S2: connect to the Python brain sidecar. Non-blocking — if the brain
+        // isn't running, the bridge retries with exponential backoff. Glass
+        // never blocks waiting for the brain.
+        brainBridge.connect();
 
     } catch (err) {
         console.error('>>> [index.js] Database initialization failed - some features may not work', err);
@@ -257,6 +263,14 @@ app.on('before-quit', async (event) => {
     event.preventDefault();
     
     try {
+        // 0. Disconnect from brain sidecar first (sends `bye`, stops reconnect loop).
+        try {
+            brainBridge.disconnect();
+            console.log('[Shutdown] Brain bridge disconnected');
+        } catch (brainErr) {
+            console.warn('[Shutdown] Brain bridge disconnect failed (non-critical):', brainErr.message);
+        }
+
         // 1. Stop audio capture first (immediate)
         await listenService.closeSession();
         console.log('[Shutdown] Audio capture stopped');
