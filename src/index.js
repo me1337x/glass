@@ -227,6 +227,28 @@ app.whenReady().then(async () => {
         // never blocks waiting for the brain.
         brainBridge.connect();
 
+        // S4: forward brain transcripts into Glass's existing stt-update channel
+        // so SttView renders them with no UI changes. Brain sends speaker_id
+        // values that match what SttView.handleSttUpdate expects: "Me" for the
+        // mic-source stream, "Them" for system audio (real diarization arrives
+        // in S5 and replaces these with spk_1 / spk_2 / ...).
+        brainBridge.on('message:transcript.final', (data) => {
+            listenService.sendToRenderer('stt-update', {
+                speaker: data?.speaker_id || 'spk_unknown',
+                text: data?.text || '',
+                isFinal: true,
+                isPartial: false,
+            });
+        });
+        brainBridge.on('message:transcript.partial', (data) => {
+            listenService.sendToRenderer('stt-update', {
+                speaker: data?.speaker_id || 'spk_unknown',
+                text: data?.text || '',
+                isFinal: false,
+                isPartial: true,
+            });
+        });
+
     } catch (err) {
         console.error('>>> [index.js] Database initialization failed - some features may not work', err);
         // Optionally, show an error dialog to the user
