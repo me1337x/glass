@@ -112,4 +112,7 @@ data/*.db-wal
 # Build output
 out/
 dist/
-build/ 
+build/
+
+# notes-overlay fork: knowledge-graph artifacts (regenerable via /understand-anything)
+.understand-anything/

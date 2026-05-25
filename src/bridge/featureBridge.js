@@ -98,6 +98,10 @@ module.exports = {
         return { success: false, error: error.message };
       }
     });
+    // Glass v0.2.4 bug fix: preload.js exposes is-session-active via ipcRenderer.invoke
+    // but no main-side handler was registered. listenCapture.js:508 throws as a result,
+    // killing Windows audio capture entirely. See Glass issues #201/#193/#165.
+    ipcMain.handle('is-session-active', () => listenService.isSessionActive());
 
     // ModelStateService
     ipcMain.handle('model:validate-key', async (e, { provider, key }) => await modelStateService.handleValidateKey(provider, key));
