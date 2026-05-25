@@ -11,6 +11,56 @@ const presetRepository = require('../features/common/repositories/preset');
 const askService = require('../features/ask/askService');
 const listenService = require('../features/listen/listenService');
 const permissionService = require('../features/common/services/permissionService');
+const brainBridge = require('../brain-bridge'); // S3: fan out audio frames to brain
+
+// --- S3 helpers: audio fan-out ----------------------------------------------
+
+/** Pull the sample-rate hint out of a mime-type like "audio/pcm;rate=24000". */
+function _parseSampleRate(mimeType, fallback = 24000) {
+    const m = (mimeType || '').match(/rate=(\d+)/);
+    return m ? parseInt(m[1], 10) : fallback;
+}
+
+/**
+ * Drop counter — gets logged once per ~5 seconds so we don't spam stdout
+ * at the audio cadence (~10 frames/sec * 2 sources = 20 drops/sec when the
+ * brain is offline). Reset on a successful send.
+ */
+let _audioDropsSinceLastLog = 0;
+let _lastDropLogTs = 0;
+
+function _fanOutAudioFrameToBrain(source, data, mimeType) {
+    if (!brainBridge.connected) {
+        _audioDropsSinceLastLog++;
+        const now = Date.now();
+        if (now - _lastDropLogTs > 5000) {
+            console.warn(
+                `[FeatureBridge] dropped ${_audioDropsSinceLastLog} audio frames since last log ` +
+                `(brain not connected); will keep dropping silently until it reconnects.`
+            );
+            _audioDropsSinceLastLog = 0;
+            _lastDropLogTs = now;
+        }
+        return;
+    }
+    const sessionId = listenService.currentSessionId;
+    if (!sessionId) {
+        // No active listen session — frame would be unattributable. Skip.
+        return;
+    }
+    if (_audioDropsSinceLastLog > 0) {
+        _audioDropsSinceLastLog = 0; // reset on first successful send after a dry spell
+    }
+    brainBridge.send('audio.frame', {
+        session_id: sessionId,
+        source, // 'mic' | 'system'
+        format: 'pcm_s16le',
+        sample_rate: _parseSampleRate(mimeType),
+        channels: 1,
+        duration_ms: 100,
+        payload_b64: data,
+    });
+}
 
 module.exports = {
   // Renderer로부터의 요청을 수신하고 서비스로 전달
@@ -77,10 +127,19 @@ module.exports = {
     ipcMain.handle('ask:closeAskWindow',  async () => await askService.closeAskWindow());
     
     // Listen
-    ipcMain.handle('listen:sendMicAudio', async (event, { data, mimeType }) => await listenService.handleSendMicAudioContent(data, mimeType));
+    ipcMain.handle('listen:sendMicAudio', async (event, { data, mimeType }) => {
+        // S3: fan out to the Python brain (best-effort; drops if brain offline).
+        _fanOutAudioFrameToBrain('mic', data, mimeType);
+        // Existing Glass STT path (kept as fallback / still drives the in-Glass UI).
+        return await listenService.handleSendMicAudioContent(data, mimeType);
+    });
     ipcMain.handle('listen:sendSystemAudio', async (event, { data, mimeType }) => {
+        // S3: fan out to brain before the local STT path (which has known issues).
+        _fanOutAudioFrameToBrain('system', data, mimeType);
         const result = await listenService.sttService.sendSystemAudioContent(data, mimeType);
-        if(result.success) {
+        // S0-era Glass bug: result can be undefined when STT is unconfigured;
+        // guard against the TypeError so we don't spam errors every ~100ms.
+        if (result && result.success) {
             listenService.sendToRenderer('system-audio-data', { data });
         }
         return result;
