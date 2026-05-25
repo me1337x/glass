@@ -1,0 +1,217 @@
+<!doctype html>
+<!--
+  S4.5 Stage 3 — Insight HUD prototype.
+
+  Standalone HTML loaded by a dedicated BrowserWindow with nodeIntegration
+  enabled. SPIKE-ONLY: production rewrite would route file IO through IPC.
+
+  Auto-discovers the newest subdir under <project>/meetings/ and tails its
+  summary.md + actions.md every 500ms via fs.watchFile. Renders raw
+  markdown inside <pre> blocks — legibility over polish, per the spike
+  scope.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Insight HUD (spike)</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: rgba(20, 20, 24, 0.95);
+        --panel: rgba(36, 36, 42, 0.85);
+        --border: rgba(255, 255, 255, 0.08);
+        --text: #e5e5e7;
+        --muted: rgba(229, 229, 231, 0.55);
+        --accent: #7aa2f7;
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      .root {
+        display: grid;
+        grid-template-rows: auto 1fr 1fr auto;
+        height: 100%;
+        padding: 10px;
+        gap: 8px;
+        box-sizing: border-box;
+      }
+      .titlebar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 11px;
+        color: var(--muted);
+        padding: 4px 8px;
+      }
+      .titlebar .meeting { color: var(--accent); }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px 12px;
+        overflow-y: auto;
+      }
+      .panel h2 {
+        margin: 0 0 6px 0;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 13px;
+      }
+      .footer {
+        font-size: 10px;
+        color: var(--muted);
+        padding: 4px 8px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .empty {
+        color: var(--muted);
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="root">
+      <div class="titlebar">
+        <span>Insight HUD <em>(spike prototype)</em></span>
+        <span class="meeting" id="meeting-name">no meeting yet</span>
+      </div>
+      <div class="panel">
+        <h2>Summary</h2>
+        <pre id="summary" class="empty">waiting…</pre>
+      </div>
+      <div class="panel">
+        <h2>Action items</h2>
+        <pre id="actions" class="empty">waiting…</pre>
+      </div>
+      <div class="footer">
+        <span id="status">scanning meetings/…</span>
+        <span id="latency">—</span>
+      </div>
+    </div>
+
+    <script>
+      // SPIKE: nodeIntegration is on for this window only. Production would
+      // route file IO through a small IPC bridge.
+      const fs = require('node:fs');
+      const path = require('node:path');
+
+      // hud.html lives at glass-shell/src/ui/insight-hud/. Project root is
+      // four levels up, then meetings/.
+      const MEETINGS_DIR = path.resolve(__dirname, '..', '..', '..', '..', 'meetings');
+      const POLL_MS = 500;
+
+      const summaryEl = document.getElementById('summary');
+      const actionsEl = document.getElementById('actions');
+      const meetingEl = document.getElementById('meeting-name');
+      const statusEl  = document.getElementById('status');
+      const latencyEl = document.getElementById('latency');
+
+      let currentDir = null;
+      let summaryWatcher = null;
+      let actionsWatcher = null;
+      let lastRender = { summary: 0, actions: 0 };
+
+      function newestMeetingDir() {
+        try {
+          const entries = fs.readdirSync(MEETINGS_DIR, { withFileTypes: true });
+          const dirs = entries
+            .filter(e => e.isDirectory())
+            .map(e => {
+              const full = path.join(MEETINGS_DIR, e.name);
+              return { name: e.name, full, mtimeMs: fs.statSync(full).mtimeMs };
+            })
+            .sort((a, b) => b.mtimeMs - a.mtimeMs);
+          return dirs[0] || null;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function readFileOrEmpty(p) {
+        try {
+          return fs.readFileSync(p, 'utf-8');
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function renderTarget(targetEl, content, kind) {
+        if (content === null || content.trim() === '') {
+          targetEl.textContent = `waiting for ${kind}…`;
+          targetEl.classList.add('empty');
+        } else {
+          targetEl.textContent = content;
+          targetEl.classList.remove('empty');
+        }
+        lastRender[kind] = Date.now();
+      }
+
+      function attachWatchers(dir) {
+        if (summaryWatcher) fs.unwatchFile(summaryWatcher);
+        if (actionsWatcher) fs.unwatchFile(actionsWatcher);
+
+        const summaryPath = path.join(dir.full, 'summary.md');
+        const actionsPath = path.join(dir.full, 'actions.md');
+        summaryWatcher = summaryPath;
+        actionsWatcher = actionsPath;
+
+        // Initial render (file may not exist yet)
+        renderTarget(summaryEl, readFileOrEmpty(summaryPath), 'summary');
+        renderTarget(actionsEl, readFileOrEmpty(actionsPath), 'actions');
+
+        // Poll-based watcher (works on Windows + cross-filesystem). 500ms.
+        fs.watchFile(summaryPath, { interval: POLL_MS }, () => {
+          renderTarget(summaryEl, readFileOrEmpty(summaryPath), 'summary');
+        });
+        fs.watchFile(actionsPath, { interval: POLL_MS }, () => {
+          renderTarget(actionsEl, readFileOrEmpty(actionsPath), 'actions');
+        });
+      }
+
+      function tick() {
+        const dir = newestMeetingDir();
+        if (!dir) {
+          statusEl.textContent = `scanning ${MEETINGS_DIR} (none yet)`;
+          meetingEl.textContent = 'no meeting yet';
+          return;
+        }
+        if (!currentDir || currentDir.full !== dir.full) {
+          currentDir = dir;
+          meetingEl.textContent = dir.name;
+          statusEl.textContent = `watching ${dir.name}`;
+          attachWatchers(dir);
+        }
+      }
+
+      function latencyTick() {
+        // Cheap signal: time since the last successful render
+        const now = Date.now();
+        const since = Math.min(now - lastRender.summary, now - lastRender.actions);
+        if (since > 0 && lastRender.summary > 0 && lastRender.actions > 0) {
+          latencyEl.textContent = `last update ${(since / 1000).toFixed(1)}s ago`;
+        }
+      }
+
+      tick();
+      setInterval(tick, 2000);          // rescan meetings/ every 2s
+      setInterval(latencyTick, 1000);   // refresh footer label every 1s
+    </script>
+  </body>
+</html>

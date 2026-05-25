@@ -471,6 +471,40 @@ function createFeatureWindows(header, namesToCreate) {
                 break;
             }
 
+            // S4.5 Stage 3 — insight HUD prototype. Standalone dark panel that
+            // tails the brain's per-meeting summary.md + actions.md via
+            // fs.watchFile @ 500ms. nodeIntegration is enabled here so the
+            // page can use Node's fs directly — SPIKE-ONLY (production would
+            // route through an IPC bridge in preload.js).
+            case 'insight-hud': {
+                const hud = new BrowserWindow({
+                    width: 800,
+                    height: 600,
+                    show: true,
+                    frame: false,
+                    transparent: false,
+                    hasShadow: false,
+                    skipTaskbar: true,
+                    alwaysOnTop: true,
+                    resizable: true,
+                    webPreferences: {
+                        nodeIntegration: true,
+                        contextIsolation: false,
+                    },
+                });
+                if (process.platform === 'darwin') {
+                    hud.setAlwaysOnTop(true, 'screen-saver');
+                } else {
+                    hud.setAlwaysOnTop(true);
+                }
+                hud.loadFile(path.join(__dirname, '../ui/insight-hud/hud.html'));
+                if (!app.isPackaged) {
+                    hud.webContents.openDevTools({ mode: 'detach' });
+                }
+                windowPool.set('insight-hud', hud);
+                break;
+            }
+
             case 'shortcut-settings': {
                 const shortcutEditor = new BrowserWindow({
                     ...commonChildOptions,
@@ -556,11 +590,12 @@ function createFeatureWindows(header, namesToCreate) {
         createFeatureWindow('listen');
         createFeatureWindow('ask');
         createFeatureWindow('settings');
+        createFeatureWindow('insight-hud');  // S4.5 stage 3 — spike-only
     }
 }
 
 function destroyFeatureWindows() {
-    const featureWindows = ['listen','ask','settings','shortcut-settings'];
+    const featureWindows = ['listen','ask','settings','shortcut-settings','insight-hud'];
     if (settingsHideTimer) {
         clearTimeout(settingsHideTimer);
         settingsHideTimer = null;
