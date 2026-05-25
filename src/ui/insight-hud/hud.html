@@ -111,11 +111,28 @@
       // route file IO through a small IPC bridge.
       const fs = require('node:fs');
       const path = require('node:path');
+      const { ipcRenderer } = require('electron');
 
-      // hud.html lives at glass-shell/src/ui/insight-hud/. Project root is
-      // four levels up, then meetings/.
-      const MEETINGS_DIR = path.resolve(__dirname, '..', '..', '..', '..', 'meetings');
+      // The "meetings root" is now user-picked (since 2026-05-26). On Listen
+      // click, Glass sends `hud:set-meetings-root` with the user's chosen
+      // project dir; we watch <chosen>/meetings/. Until then we fall back to
+      // the brain-default location (notesOverlay/meetings/) so older test
+      // runs and direct dev-without-Listen still work.
+      let MEETINGS_DIR = path.resolve(__dirname, '..', '..', '..', '..', 'meetings');
       const POLL_MS = 500;
+
+      ipcRenderer.on('hud:set-meetings-root', (_event, rootPath) => {
+        if (!rootPath) return;
+        // The "meetings root" is <project>/meetings/ — Glass passes the
+        // project root, the brain writes session subdirs under <project>/meetings/.
+        const newRoot = path.join(rootPath, 'meetings');
+        if (newRoot === MEETINGS_DIR) return;
+        MEETINGS_DIR = newRoot;
+        // Force a rescan + reattach on the new root.
+        currentDir = null;
+        if (statusEl) statusEl.textContent = `switched to ${rootPath}`;
+        tick();
+      });
 
       const summaryEl = document.getElementById('summary');
       const actionsEl = document.getElementById('actions');

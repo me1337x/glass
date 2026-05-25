@@ -1,11 +1,59 @@
-const { BrowserWindow } = require('electron');
+const { BrowserWindow, app, dialog } = require('electron');
+const fs = require('node:fs');
+const path = require('node:path');
 const SttService = require('./stt/sttService');
 const SummaryService = require('./summary/summaryService');
 const authService = require('../common/services/authService');
 const sessionRepository = require('../common/repositories/session');
 const sttRepository = require('./stt/repositories');
 const internalBridge = require('../../bridge/internalBridge');
+const brainBridge = require('../../brain-bridge');
 const { EVENTS } = internalBridge;
+
+// 2026-05-26: per-session meeting-folder picker. The user picks where to
+// save transcripts + agent outputs on each Listen click; we remember the
+// last choice across launches. See docs/PROTOCOL.md (meetings_dir field
+// on meeting.start) and docs/PROPOSAL-cowork-integration.md.
+const LAST_MEETINGS_DIR_FILE = path.join(app.getPath('userData'), 'last-meetings-dir.txt');
+
+function readLastMeetingsDir() {
+    try {
+        const p = fs.readFileSync(LAST_MEETINGS_DIR_FILE, 'utf-8').trim();
+        return p && fs.existsSync(p) ? p : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function writeLastMeetingsDir(dirPath) {
+    try {
+        fs.writeFileSync(LAST_MEETINGS_DIR_FILE, dirPath, 'utf-8');
+    } catch (e) {
+        console.warn('[ListenService] could not persist last meetings dir:', e.message);
+    }
+}
+
+/**
+ * Show an Electron folder picker. Returns the absolute path the user picked,
+ * or null if they cancelled. Defaults to the last-used dir if any.
+ */
+async function pickMeetingsDir() {
+    const lastDir = readLastMeetingsDir();
+    const defaultPath = lastDir || app.getPath('documents');
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+        title: 'Choose folder for meeting transcripts',
+        message: 'Pick a project folder. Meeting files (transcript, summary, actions) land in <folder>/meetings/<session>/.',
+        defaultPath,
+        properties: ['openDirectory', 'createDirectory'],
+        buttonLabel: 'Use this folder',
+    });
+    if (canceled || !filePaths || filePaths.length === 0) {
+        return null;
+    }
+    const chosen = filePaths[0];
+    writeLastMeetingsDir(chosen);
+    return chosen;
+}
 
 class ListenService {
     constructor() {
@@ -109,33 +157,75 @@ class ListenService {
             switch (listenButtonText) {
                 case 'Listen':
                     console.log('[ListenService] changeSession to "Listen"');
+
+                    // 2026-05-26: ask the user where to save this meeting's
+                    // files BEFORE doing any state changes. Cancel = abort.
+                    const meetingsDir = await pickMeetingsDir();
+                    if (!meetingsDir) {
+                        console.log('[ListenService] meetings-dir picker cancelled — aborting Listen');
+                        header.webContents.send('listen:changeSessionResult', { success: false, reason: 'cancelled' });
+                        return;
+                    }
+                    console.log(`[ListenService] meetings dir for this session: ${meetingsDir}`);
+
                     internalBridge.emit('request-window-visibility', { name: 'listen', visible: true });
                     await this.initializeSession();
                     listenWindow.webContents.send('session-state-changed', { isActive: true });
+
+                    // Notify the brain of the per-session meetings_dir override.
+                    // Optional-best-effort: if the brain isn't connected yet,
+                    // the message is dropped, but Glass continues — the brain
+                    // would fall back to its default MEETINGS_DIR for this
+                    // session, which the user can fix by restarting the
+                    // Listen click after dev.ps1 is fully up.
+                    try {
+                        brainBridge.send('meeting.start', {
+                            session_id: this.currentSessionId,
+                            meetings_dir: meetingsDir,
+                        });
+                        console.log('[ListenService] sent meeting.start to brain with meetings_dir');
+                    } catch (e) {
+                        console.warn('[ListenService] failed to send meeting.start to brain:', e.message);
+                    }
+
+                    // Tell the Insight HUD to switch its file watcher to the new dir.
+                    const hudWindow = windowPool.get('insight-hud');
+                    if (hudWindow && !hudWindow.isDestroyed()) {
+                        hudWindow.webContents.send('hud:set-meetings-root', meetingsDir);
+                    }
                     break;
-        
+
                 case 'Stop':
                     console.log('[ListenService] changeSession to "Stop"');
+                    // Inform brain so it can drop per-session state.
+                    if (this.currentSessionId) {
+                        try {
+                            brainBridge.send('meeting.end', {
+                                session_id: this.currentSessionId,
+                                reason: 'user_stopped',
+                            });
+                        } catch (_) { /* best-effort */ }
+                    }
                     await this.closeSession();
                     listenWindow.webContents.send('session-state-changed', { isActive: false });
                     break;
-        
+
                 case 'Done':
                     console.log('[ListenService] changeSession to "Done"');
                     internalBridge.emit('request-window-visibility', { name: 'listen', visible: false });
                     listenWindow.webContents.send('session-state-changed', { isActive: false });
                     break;
-        
+
                 default:
                     throw new Error(`[ListenService] unknown listenButtonText: ${listenButtonText}`);
             }
-            
+
             header.webContents.send('listen:changeSessionResult', { success: true });
 
         } catch (error) {
             console.error('[ListenService] error in handleListenRequest:', error);
             header.webContents.send('listen:changeSessionResult', { success: false });
-            throw error; 
+            throw error;
         }
     }
 
