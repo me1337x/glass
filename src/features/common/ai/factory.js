@@ -46,7 +46,7 @@ const PROVIDERS = {
           { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
       ],
       sttModels: [
-          { id: 'gemini-live-2.5-flash-preview', name: 'Gemini Live 2.5 Flash' }
+          { id: 'gemini-3.1-flash-live-preview', name: 'Gemini Live 3.1 Flash' }
       ],
   },
   'anthropic': {
