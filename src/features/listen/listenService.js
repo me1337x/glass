@@ -336,25 +336,37 @@ class ListenService {
             }
 
             /* ---------- STT Initialization Retry Logic ---------- */
-            const MAX_RETRY = 10;
-            const RETRY_DELAY_MS = 300;   // 0.3 seconds
-
+            // 2026-05-26 — S4.8 — short-circuit when brain is connected.
+            // Brain owns STT per ADR-012; Glass's local Whisper path is a
+            // pre-existing fallback that's known-broken on Windows (EPERM
+            // on whisper-tiny.bin + a CLI-arg bug invoking the `whisper`
+            // CLI per audio chunk). Trying to init it produces ~120 lines
+            // of noise per meeting for zero benefit. Skip if brain is up.
             let sttReady = false;
-            for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
-                try {
-                    await this.sttService.initializeSttSessions(language);
-                    sttReady = true;
-                    break;                         // Exit on success
-                } catch (err) {
-                    console.warn(
-                        `[ListenService] STT init attempt ${attempt} failed: ${err.message}`
-                    );
-                    if (attempt < MAX_RETRY) {
-                        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+            if (brainBridge.connected) {
+                console.log('[ListenService] Skipping local Whisper STT init — brain is connected and owns STT (ADR-012).');
+                sttReady = true;
+            } else {
+                console.log('[ListenService] Brain not connected — falling back to local Whisper STT init.');
+                const MAX_RETRY = 10;
+                const RETRY_DELAY_MS = 300;   // 0.3 seconds
+
+                for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
+                    try {
+                        await this.sttService.initializeSttSessions(language);
+                        sttReady = true;
+                        break;                         // Exit on success
+                    } catch (err) {
+                        console.warn(
+                            `[ListenService] STT init attempt ${attempt} failed: ${err.message}`
+                        );
+                        if (attempt < MAX_RETRY) {
+                            await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+                        }
                     }
                 }
+                if (!sttReady) throw new Error('STT init failed after retries');
             }
-            if (!sttReady) throw new Error('STT init failed after retries');
             /* ------------------------------------------- */
 
             console.log('✅ Listen service initialized successfully.');

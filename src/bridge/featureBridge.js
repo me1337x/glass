@@ -166,12 +166,25 @@ module.exports = {
     ipcMain.handle('listen:sendMicAudio', async (event, { data, mimeType }) => {
         // S3: fan out to the Python brain (best-effort; drops if brain offline).
         _fanOutAudioFrameToBrain('mic', data, mimeType);
+        // 2026-05-26 — S4.8 — see system-audio handler below for context.
+        // When brain is connected it owns STT; skip the local fallback path
+        // entirely to silence the per-chunk WhisperSTT noise.
+        if (brainBridge.connected) {
+            return { success: true };
+        }
         // Existing Glass STT path (kept as fallback / still drives the in-Glass UI).
         return await listenService.handleSendMicAudioContent(data, mimeType);
     });
     ipcMain.handle('listen:sendSystemAudio', async (event, { data, mimeType }) => {
         // S3: fan out to brain before the local STT path (which has known issues).
         _fanOutAudioFrameToBrain('system', data, mimeType);
+        // 2026-05-26 — S4.8 — when brain is connected, skip Glass's local STT
+        // entirely (per ADR-012 brain owns STT; local Whisper is broken on
+        // Windows anyway). Avoids ~120 lines of [WhisperSTT-...] Process
+        // error noise per meeting.
+        if (brainBridge.connected) {
+            return { success: true };
+        }
         const result = await listenService.sttService.sendSystemAudioContent(data, mimeType);
         // S0-era Glass bug: result can be undefined when STT is unconfigured;
         // guard against the TypeError so we don't spam errors every ~100ms.
