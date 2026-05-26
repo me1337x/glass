@@ -12,6 +12,7 @@ const presetRepository = require('../features/common/repositories/preset');
 
 const askService = require('../features/ask/askService');
 const listenService = require('../features/listen/listenService');
+const windowPickerService = require('../features/listen/windowPickerService');
 const permissionService = require('../features/common/services/permissionService');
 const brainBridge = require('../brain-bridge'); // S3: fan out audio frames to brain
 
@@ -221,6 +222,28 @@ module.exports = {
     // but no main-side handler was registered. listenCapture.js:508 throws as a result,
     // killing Windows audio capture entirely. See Glass issues #201/#193/#165.
     ipcMain.handle('is-session-active', () => listenService.isSessionActive());
+
+    // S6 (2026-05-27): window picker + screen frame fan-out to brain.
+    ipcMain.handle('brain:listCaptureWindows', async () => {
+        try {
+            return await windowPickerService.listCaptureWindows();
+        } catch (e) {
+            console.error('[FeatureBridge] brain:listCaptureWindows failed:', e.message);
+            return [];
+        }
+    });
+    ipcMain.handle('brain:sendScreenFrame', async (event, frameData) => {
+        // Fire-and-forget to brain; drop silently if disconnected (frames are
+        // safe to lose — next 5s tick produces a fresh one).
+        if (!brainBridge.connected) return { success: false, reason: 'brain_offline' };
+        try {
+            brainBridge.send('screen.frame', frameData);
+            return { success: true };
+        } catch (e) {
+            console.warn('[FeatureBridge] brain:sendScreenFrame send failed:', e.message);
+            return { success: false, reason: 'send_error' };
+        }
+    });
 
     // ModelStateService
     ipcMain.handle('model:validate-key', async (e, { provider, key }) => await modelStateService.handleValidateKey(provider, key));

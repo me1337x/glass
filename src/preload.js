@@ -288,13 +288,19 @@ contextBridge.exposeInMainWorld('api', {
     sendSystemAudioContent: (data) => ipcRenderer.invoke('listen:sendSystemAudio', data),
     startMacosSystemAudio: () => ipcRenderer.invoke('listen:startMacosSystemAudio'),
     stopMacosSystemAudio: () => ipcRenderer.invoke('listen:stopMacosSystemAudio'),
-    
+
     // Session Management
     isSessionActive: () => ipcRenderer.invoke('is-session-active'),
-    
+
     // Listeners
     onSystemAudioData: (callback) => ipcRenderer.on('system-audio-data', callback),
     removeOnSystemAudioData: (callback) => ipcRenderer.removeListener('system-audio-data', callback)
+  },
+
+  // src/features/listen/windowPickerService.js + brain frame fan-out (S6, 2026-05-27)
+  brain: {
+    listCaptureWindows: () => ipcRenderer.invoke('brain:listCaptureWindows'),
+    sendScreenFrame: (data) => ipcRenderer.invoke('brain:sendScreenFrame', data),
   },
 
   // src/ui/listen/audioCore/renderer.js
