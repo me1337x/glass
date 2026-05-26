@@ -525,35 +525,68 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
                     console.warn('[Listen] could not read saved mic device id:', e?.message);
                 }
 
-                const baseAudio = {
+                // Three-tier constraint fallback, important for Bluetooth headsets
+                // (which can't satisfy 24kHz + AEC/NS/AGC stacked on top of their
+                // own processing) and devices that disappeared since we saved
+                // their ID.
+                //
+                // Tier 1: user's device + full ideal processing (works for most
+                //         wired mics, webcams, USB headsets)
+                // Tier 2: user's device + minimal constraints (works for Bluetooth
+                //         HFP, which is 8-16kHz mono with hardware AEC; the Web Audio
+                //         API will resample to whatever AudioContext rate we use)
+                // Tier 3: system default + full ideal (last-resort if the chosen
+                //         device is genuinely gone — unplugged, profile not exposed)
+                const fullProcessing = {
                     sampleRate: SAMPLE_RATE,
                     channelCount: 1,
                     echoCancellation: true,
                     noiseSuppression: true,
                     autoGainControl: true,
                 };
-                const audioConstraint = savedMicId
-                    ? { ...baseAudio, deviceId: { exact: savedMicId } }
-                    : baseAudio;
+                const minimalConstraints = {
+                    // No sampleRate, no AEC/NS/AGC — let the device decide. Web
+                    // Audio's AudioContext at SAMPLE_RATE will resample on input.
+                    channelCount: { ideal: 1 },
+                };
+
+                const tryGetUserMedia = async (audioConstraint) =>
+                    navigator.mediaDevices.getUserMedia({ audio: audioConstraint, video: false });
+
+                const isOverConstrainedOrUnreadable = (err) =>
+                    err?.name === 'OverconstrainedError' || err?.name === 'NotReadableError';
 
                 try {
-                    micMediaStream = await navigator.mediaDevices.getUserMedia({
-                        audio: audioConstraint,
-                        video: false,
-                    });
                     if (savedMicId) {
-                        console.log(`Windows microphone capture started (deviceId=${savedMicId.slice(0, 12)}…)`);
+                        // Tier 1
+                        try {
+                            micMediaStream = await tryGetUserMedia({ ...fullProcessing, deviceId: { exact: savedMicId } });
+                            console.log(`Windows microphone capture started (deviceId=${savedMicId.slice(0, 12)}…, full constraints)`);
+                        } catch (tier1Err) {
+                            if (isOverConstrainedOrUnreadable(tier1Err)) {
+                                // Tier 2 — keep the chosen device, drop the picky processing flags
+                                console.warn(`[Listen] mic ${savedMicId.slice(0, 12)}… rejected full constraints (${tier1Err.name}: ${tier1Err.message}); retrying with minimal`);
+                                try {
+                                    micMediaStream = await tryGetUserMedia({ ...minimalConstraints, deviceId: { exact: savedMicId } });
+                                    console.log(`Windows microphone capture started (deviceId=${savedMicId.slice(0, 12)}…, minimal constraints — likely Bluetooth HFP)`);
+                                } catch (tier2Err) {
+                                    // Tier 3 — give up on the chosen device, fall back to default
+                                    console.warn(`[Listen] mic ${savedMicId.slice(0, 12)}… unusable even with minimal constraints (${tier2Err.name}: ${tier2Err.message}); falling back to system default`);
+                                    micMediaStream = await tryGetUserMedia(fullProcessing);
+                                    console.log('Windows microphone capture started (system default — chosen device unusable)');
+                                }
+                            } else {
+                                throw tier1Err;
+                            }
+                        }
                     } else {
+                        // No saved device — start with full constraints on system default
+                        micMediaStream = await tryGetUserMedia(fullProcessing);
                         console.log('Windows microphone capture started (system default)');
                     }
-                } catch (constraintErr) {
-                    if (savedMicId && constraintErr?.name === 'OverconstrainedError') {
-                        console.warn(`[Listen] saved mic device ${savedMicId.slice(0, 12)}… not available, falling back to system default`);
-                        micMediaStream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio, video: false });
-                        console.log('Windows microphone capture started (fallback to default after OverconstrainedError)');
-                    } else {
-                        throw constraintErr;
-                    }
+                } catch (anyErr) {
+                    console.warn('Could not get microphone access on Windows:', anyErr);
+                    throw anyErr;
                 }
 
                 const { context, processor } = await setupMicProcessing(micMediaStream);
