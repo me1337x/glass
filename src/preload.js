@@ -301,6 +301,8 @@ contextBridge.exposeInMainWorld('api', {
   brain: {
     listCaptureWindows: () => ipcRenderer.invoke('brain:listCaptureWindows'),
     sendScreenFrame: (data) => ipcRenderer.invoke('brain:sendScreenFrame', data),
+    notifyWindowPicked: (data) => ipcRenderer.invoke('brain:notifyWindowPicked', data),
+    onStopScreenCapture: (callback) => ipcRenderer.on('brain:stopScreenCapture', callback),
   },
 
   // src/ui/listen/audioCore/renderer.js

@@ -244,6 +244,24 @@ module.exports = {
             return { success: false, reason: 'send_error' };
         }
     });
+    ipcMain.handle('brain:notifyWindowPicked', async (event, { sessionId, captureWindowTitle, captureWindowId }) => {
+        // S6 (2026-05-27): renderer just resolved a window-picker selection.
+        // Send a second meeting.start carrying just capture_window_title +
+        // capture_window_id; brain's handle_meeting_start merges fields by
+        // setdefault, so this just adds the title onto the existing config.
+        if (!brainBridge.connected) return { success: false, reason: 'brain_offline' };
+        try {
+            brainBridge.send('meeting.start', {
+                session_id: sessionId,
+                capture_window_title: captureWindowTitle,
+                capture_window_id: captureWindowId,
+            });
+            return { success: true };
+        } catch (e) {
+            console.warn('[FeatureBridge] brain:notifyWindowPicked send failed:', e.message);
+            return { success: false, reason: 'send_error' };
+        }
+    });
 
     // ModelStateService
     ipcMain.handle('model:validate-key', async (e, { provider, key }) => await modelStateService.handleValidateKey(provider, key));
