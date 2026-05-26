@@ -401,6 +401,18 @@ class ListenService {
     }
 
     isSessionActive() {
+        // 2026-05-26 — S4.8 follow-up. When brain is connected, S4.8 skips
+        // local STT init (mySttSession / theirSttSession stay null), so
+        // sttService.isSessionActive() returns false. But the renderer-side
+        // audio capture loop (listenCapture.js) checks this before starting
+        // mic + system capture and refuses to proceed if false — meaning
+        // audio never flows to the brain either. Treat brain-connected
+        // sessions as active for capture-gating purposes; the brain's
+        // transcript_sink is the source of truth for whether transcripts
+        // actually land.
+        if (brainBridge.connected && this.currentSessionId) {
+            return true;
+        }
         return this.sttService.isSessionActive();
     }
 
