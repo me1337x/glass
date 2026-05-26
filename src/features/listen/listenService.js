@@ -8,6 +8,7 @@ const sessionRepository = require('../common/repositories/session');
 const sttRepository = require('./stt/repositories');
 const internalBridge = require('../../bridge/internalBridge');
 const brainBridge = require('../../brain-bridge');
+const projectFoldersStore = require('../settings/projectFoldersStore');
 const { EVENTS } = internalBridge;
 
 // 2026-05-26: per-session meeting-folder picker. The user picks where to
@@ -172,26 +173,43 @@ class ListenService {
                     await this.initializeSession();
                     listenWindow.webContents.send('session-state-changed', { isActive: true });
 
-                    // Notify the brain of the per-session meetings_dir override.
-                    // Optional-best-effort: if the brain isn't connected yet,
-                    // the message is dropped, but Glass continues — the brain
-                    // would fall back to its default MEETINGS_DIR for this
-                    // session, which the user can fix by restarting the
-                    // Listen click after dev.ps1 is fully up.
+                    // 2026-05-26 — S4.7: detect whether the chosen folder lives
+                    // under any registered parent project folder. If so, the
+                    // meeting is "project-aware" — the brain stores
+                    // project_root for this session so future agents can Grep
+                    // across that root for cross-meeting context.
+                    const projectCtx = projectFoldersStore.detectProjectContext(meetingsDir);
+                    if (projectCtx.is_inside_project) {
+                        console.log(
+                            `[ListenService] meeting is project-aware — root: ${projectCtx.project_root}`,
+                        );
+                    }
+
+                    // Notify the brain of the per-session meetings_dir override
+                    // plus the project_root if detected. Best-effort: if the
+                    // brain isn't connected yet the message is dropped, Glass
+                    // continues, and the brain falls back to its default
+                    // MEETINGS_DIR with no project awareness for this session.
                     try {
                         brainBridge.send('meeting.start', {
                             session_id: this.currentSessionId,
                             meetings_dir: meetingsDir,
+                            project_root: projectCtx.project_root,
+                            is_inside_project: projectCtx.is_inside_project,
                         });
-                        console.log('[ListenService] sent meeting.start to brain with meetings_dir');
+                        console.log('[ListenService] sent meeting.start to brain');
                     } catch (e) {
                         console.warn('[ListenService] failed to send meeting.start to brain:', e.message);
                     }
 
                     // Tell the Insight HUD to switch its file watcher to the new dir.
+                    // Pass project_root so the HUD can surface it in the title bar.
                     const hudWindow = windowPool.get('insight-hud');
                     if (hudWindow && !hudWindow.isDestroyed()) {
                         hudWindow.webContents.send('hud:set-meetings-root', meetingsDir);
+                        if (projectCtx.is_inside_project) {
+                            hudWindow.webContents.send('hud:set-project-root', projectCtx.project_root);
+                        }
                     }
                     break;
 

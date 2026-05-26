@@ -1,6 +1,7 @@
 // src/bridge/featureBridge.js
-const { ipcMain, app } = require('electron');
+const { ipcMain, app, dialog, BrowserWindow } = require('electron');
 const settingsService = require('../features/settings/settingsService');
+const projectFoldersStore = require('../features/settings/projectFoldersStore');
 const authService = require('../features/common/services/authService');
 const whisperService = require('../features/common/services/whisperService');
 const ollamaService = require('../features/common/services/ollamaService');
@@ -77,6 +78,41 @@ module.exports = {
     ipcMain.handle('settings:get-ollama-status', async () => await settingsService.getOllamaStatus());
     ipcMain.handle('settings:ensure-ollama-ready', async () => await settingsService.ensureOllamaReady());
     ipcMain.handle('settings:shutdown-ollama', async () => await settingsService.shutdownOllama());
+
+    // 2026-05-26 — S4.7 — parent project folders (Cowork-style context).
+    // The list lives in a JSON file under app.getPath('userData'). When the
+    // user picks a meetings folder via the Listen click picker, ListenService
+    // calls projectFoldersStore.detectProjectContext() to see whether the
+    // chosen folder is inside any registered parent; if so, the brain learns
+    // the project_root and future agents Grep across it.
+    ipcMain.handle('settings:getProjectFolders', () => projectFoldersStore.list());
+    ipcMain.handle('settings:addProjectFolder', async (event) => {
+        // Open native picker scoped to the window that asked. Returns the
+        // updated list (after add), or the unchanged list if cancelled.
+        const win = BrowserWindow.fromWebContents(event.sender);
+        const { canceled, filePaths } = await dialog.showOpenDialog(win || undefined, {
+            title: 'Pick a parent project folder',
+            message: "Pick a folder that contains your project subfolders. When you pick a meeting folder inside one of these, the app treats it as project-aware.",
+            properties: ['openDirectory', 'createDirectory'],
+            buttonLabel: 'Add as parent folder',
+        });
+        if (canceled || !filePaths || filePaths.length === 0) {
+            return projectFoldersStore.list();
+        }
+        try {
+            const updated = projectFoldersStore.add(filePaths[0]);
+            _broadcastProjectFoldersUpdated(updated);
+            return updated;
+        } catch (e) {
+            console.warn('[featureBridge] addProjectFolder failed:', e.message);
+            return projectFoldersStore.list();
+        }
+    });
+    ipcMain.handle('settings:removeProjectFolder', (event, dirPath) => {
+        const updated = projectFoldersStore.remove(dirPath);
+        _broadcastProjectFoldersUpdated(updated);
+        return updated;
+    });
 
     // Shortcuts
     ipcMain.handle('get-current-shortcuts', async () => await shortcutsService.loadKeybinds());
@@ -181,3 +217,14 @@ module.exports = {
     win.webContents.send('feature:ask:progress', progress);
   },
 };
+
+// 2026-05-26 — S4.7 helper: notify every window when the parent project
+// folders list changes, so the SettingsView (and any future consumer)
+// updates without polling. Settings view subscribes via preload.
+function _broadcastProjectFoldersUpdated(folders) {
+    for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) {
+            win.webContents.send('settings:project-folders-updated', folders);
+        }
+    }
+}

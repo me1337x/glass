@@ -211,6 +211,15 @@ contextBridge.exposeInMainWorld('api', {
     getPresets: () => ipcRenderer.invoke('settings:getPresets'),
     getAutoUpdate: () => ipcRenderer.invoke('settings:get-auto-update'),
     setAutoUpdate: (isEnabled) => ipcRenderer.invoke('settings:set-auto-update', isEnabled),
+
+    // 2026-05-26 — S4.7 — parent project folders. List + add (opens native
+    // folder picker) + remove. Updates come back via the
+    // settings:project-folders-updated event below.
+    getProjectFolders:    ()        => ipcRenderer.invoke('settings:getProjectFolders'),
+    addProjectFolder:     ()        => ipcRenderer.invoke('settings:addProjectFolder'),
+    removeProjectFolder:  (dirPath) => ipcRenderer.invoke('settings:removeProjectFolder', dirPath),
+    onProjectFoldersUpdated:        (cb) => ipcRenderer.on('settings:project-folders-updated', cb),
+    removeOnProjectFoldersUpdated:  (cb) => ipcRenderer.removeListener('settings:project-folders-updated', cb),
     getContentProtectionStatus: () => ipcRenderer.invoke('get-content-protection-status'),
     toggleContentProtection: () => ipcRenderer.invoke('toggle-content-protection'),
     getCurrentShortcuts: () => ipcRenderer.invoke('get-current-shortcuts'),

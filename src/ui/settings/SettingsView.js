@@ -348,6 +348,88 @@ export class SettingsView extends LitElement {
             color: rgba(0, 122, 255, 1);
         }
 
+        /* S4.7 — parent project folders. Mirrors .preset-section styling. */
+        .project-folders-section {
+            padding: 6px 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .project-folders-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .project-folder-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+            font-size: 11px;
+            gap: 4px;
+        }
+
+        .project-folder-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .project-folder-name {
+            color: white;
+            flex: 1;
+            text-overflow: ellipsis;
+            overflow: hidden;
+            white-space: nowrap;
+            font-weight: 300;
+        }
+
+        .project-folder-remove {
+            color: rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            font-size: 12px;
+            padding: 0 4px;
+            border-radius: 2px;
+            line-height: 1;
+        }
+
+        .project-folder-remove:hover {
+            color: rgba(255, 90, 90, 0.95);
+            background: rgba(255, 90, 90, 0.12);
+        }
+
+        .project-folders-add {
+            margin-top: 4px;
+            padding: 4px 6px;
+            background: rgba(0, 122, 255, 0.15);
+            color: rgba(0, 122, 255, 0.95);
+            border: 1px solid rgba(0, 122, 255, 0.3);
+            border-radius: 3px;
+            font-size: 11px;
+            text-align: center;
+            cursor: pointer;
+            transition: background-color 0.15s ease;
+        }
+
+        .project-folders-add:hover {
+            background: rgba(0, 122, 255, 0.25);
+        }
+
+        .project-folders-add[disabled] {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .no-project-folders-message {
+            padding: 6px 8px;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 10px;
+            line-height: 1.4;
+        }
+
         .loading-state {
             display: flex;
             align-items: center;
@@ -497,6 +579,10 @@ export class SettingsView extends LitElement {
         presets: { type: Array, state: true },
         selectedPreset: { type: Object, state: true },
         showPresets: { type: Boolean, state: true },
+        // S4.7 — parent project folders for project-aware meetings
+        projectFolders: { type: Array, state: true },
+        showProjectFolders: { type: Boolean, state: true },
+        addingProjectFolder: { type: Boolean, state: true },
         autoUpdateEnabled: { type: Boolean, state: true },
         autoUpdateLoading: { type: Boolean, state: true },
         // Ollama related properties
@@ -527,6 +613,10 @@ export class SettingsView extends LitElement {
         this.presets = [];
         this.selectedPreset = null;
         this.showPresets = false;
+        // S4.7 — parent project folders for project-aware meetings
+        this.projectFolders = [];
+        this.showProjectFolders = false;
+        this.addingProjectFolder = false;
         // Ollama related
         this.ollamaStatus = { installed: false, running: false };
         this.ollamaModels = [];
@@ -580,14 +670,15 @@ export class SettingsView extends LitElement {
         if (!window.api) return;
         this.isLoading = true;
         try {
-            const [userState, modelSettings, presets, contentProtection, shortcuts, ollamaStatus, whisperModelsResult] = await Promise.all([
+            const [userState, modelSettings, presets, contentProtection, shortcuts, ollamaStatus, whisperModelsResult, projectFolders] = await Promise.all([
                 window.api.settingsView.getCurrentUser(),
                 window.api.settingsView.getModelSettings(), // Facade call
                 window.api.settingsView.getPresets(),
                 window.api.settingsView.getContentProtectionStatus(),
                 window.api.settingsView.getCurrentShortcuts(),
                 window.api.settingsView.getOllamaStatus(),
-                window.api.settingsView.getWhisperInstalledModels()
+                window.api.settingsView.getWhisperInstalledModels(),
+                window.api.settingsView.getProjectFolders(), // S4.7
             ]);
             
             if (userState && userState.isLoggedIn) this.firebaseUser = userState;
@@ -603,6 +694,7 @@ export class SettingsView extends LitElement {
             }
 
             this.presets = presets || [];
+            this.projectFolders = projectFolders || []; // S4.7
             this.isContentProtectionOn = contentProtection;
             this.shortcuts = shortcuts || {};
             if (this.presets.length > 0) {
@@ -882,6 +974,42 @@ export class SettingsView extends LitElement {
         window.api.settingsView.openShortcutEditor();
     }
 
+    // S4.7 — parent project folders
+    toggleProjectFolders() {
+        this.showProjectFolders = !this.showProjectFolders;
+    }
+
+    async handleAddProjectFolder() {
+        if (this.addingProjectFolder) return;
+        this.addingProjectFolder = true;
+        try {
+            const updated = await window.api.settingsView.addProjectFolder();
+            this.projectFolders = updated || [];
+        } catch (e) {
+            console.error('[SettingsView] addProjectFolder failed:', e);
+        }
+        this.addingProjectFolder = false;
+        this.requestUpdate();
+    }
+
+    async handleRemoveProjectFolder(dirPath) {
+        try {
+            const updated = await window.api.settingsView.removeProjectFolder(dirPath);
+            this.projectFolders = updated || [];
+        } catch (e) {
+            console.error('[SettingsView] removeProjectFolder failed:', e);
+        }
+        this.requestUpdate();
+    }
+
+    /** Get the last path segment for display (e.g. "Projects" from "C:/.../Projects"). */
+    _basename(p) {
+        if (!p) return '';
+        const normalized = p.replace(/\\/g, '/');
+        const parts = normalized.split('/').filter(Boolean);
+        return parts.length ? parts[parts.length - 1] : p;
+    }
+
     connectedCallback() {
         super.connectedCallback();
         
@@ -959,10 +1087,17 @@ export class SettingsView extends LitElement {
             this.shortcuts = keybinds;
         };
         
+        // S4.7 — parent project folders list reactive updates
+        this._projectFoldersListener = (_event, folders) => {
+            this.projectFolders = folders || [];
+            this.requestUpdate();
+        };
+
         window.api.settingsView.onUserStateChanged(this._userStateListener);
         window.api.settingsView.onSettingsUpdated(this._settingsUpdatedListener);
         window.api.settingsView.onPresetsUpdated(this._presetsUpdatedListener);
         window.api.settingsView.onShortcutsUpdated(this._shortcutListener);
+        window.api.settingsView.onProjectFoldersUpdated(this._projectFoldersListener);
     }
 
     cleanupIpcListeners() {
@@ -979,6 +1114,9 @@ export class SettingsView extends LitElement {
         }
         if (this._shortcutListener) {
             window.api.settingsView.removeOnShortcutsUpdated(this._shortcutListener);
+        }
+        if (this._projectFoldersListener) {
+            window.api.settingsView.removeOnProjectFoldersUpdated(this._projectFoldersListener);
         }
     }
 
@@ -1408,7 +1546,7 @@ export class SettingsView extends LitElement {
                             ${this.showPresets ? '▼' : '▶'}
                         </span>
                     </div>
-                    
+
                     <div class="preset-list ${this.showPresets ? '' : 'hidden'}">
                         ${this.presets.filter(p => p.is_default === 0).length === 0 ? html`
                             <div class="no-presets-message">
@@ -1424,6 +1562,42 @@ export class SettingsView extends LitElement {
                                 ${this.selectedPreset?.id === preset.id ? html`<span class="preset-status">Selected</span>` : ''}
                             </div>
                         `)}
+                    </div>
+                </div>
+
+                <!-- S4.7 — Parent Project Folders (project-aware meetings). -->
+                <div class="project-folders-section">
+                    <div class="preset-header">
+                        <span class="preset-title">
+                            Project Folders
+                            <span class="preset-count">(${this.projectFolders.length})</span>
+                        </span>
+                        <span class="preset-toggle" @click=${this.toggleProjectFolders}>
+                            ${this.showProjectFolders ? '▼' : '▶'}
+                        </span>
+                    </div>
+
+                    <div class="project-folders-list ${this.showProjectFolders ? '' : 'hidden'}">
+                        ${this.projectFolders.length === 0 ? html`
+                            <div class="no-project-folders-message">
+                                No project folders yet.<br>
+                                Add one so meeting transcripts<br>
+                                land in your project, with<br>
+                                surrounding files as context.
+                            </div>
+                        ` : this.projectFolders.map(folder => html`
+                            <div class="project-folder-item" title=${folder}>
+                                <span class="project-folder-name">${this._basename(folder)}</span>
+                                <span class="project-folder-remove"
+                                      title="Remove ${folder}"
+                                      @click=${() => this.handleRemoveProjectFolder(folder)}>×</span>
+                            </div>
+                        `)}
+                        <div class="project-folders-add ${this.addingProjectFolder ? 'disabled' : ''}"
+                             ?disabled=${this.addingProjectFolder}
+                             @click=${this.handleAddProjectFolder}>
+                            ${this.addingProjectFolder ? 'Choosing…' : '+ Add folder'}
+                        </div>
                     </div>
                 </div>
 
