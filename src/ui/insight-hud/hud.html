@@ -124,16 +124,36 @@
       ipcRenderer.on('hud:set-meetings-root', (_event, rootPath) => {
         if (!rootPath) return;
         // The "meetings root" is <project>/meetings/ — Glass passes the
-        // project root, the brain writes session subdirs under <project>/meetings/.
+        // project root, the brain writes session subdirs under
+        // <project>/meetings/. Always reset cleanly on a fresh Listen click
+        // — even if the path is the same as the previous session, the user
+        // clearly wants the HUD to refocus.
         const newRoot = path.join(rootPath, 'meetings');
-        if (newRoot === MEETINGS_DIR) return;
         MEETINGS_DIR = newRoot;
-        // Force a rescan + reattach on the new root.
+
+        // Stop watching the previous session's files (otherwise stale
+        // content from the last meeting keeps re-rendering).
+        if (summaryWatcher) { try { fs.unwatchFile(summaryWatcher); } catch(_){} summaryWatcher = null; }
+        if (actionsWatcher) { try { fs.unwatchFile(actionsWatcher); } catch(_){} actionsWatcher = null; }
         currentDir = null;
+        lastRender = { summary: 0, actions: 0 };
+
+        // Clear the panel content visibly so the user knows the HUD has
+        // re-targeted, then immediately probe the new root.
+        summaryEl.textContent = 'waiting for summary…';
+        summaryEl.classList.add('empty');
+        actionsEl.textContent = 'waiting for actions…';
+        actionsEl.classList.add('empty');
+        meetingEl.textContent = 'starting…';
+
         if (statusEl) statusEl.textContent = `switched to ${rootPath}`;
+        if (latencyEl) latencyEl.textContent = '—';
         tick();
+
         // Default the project pill to hidden; if Glass detects we're inside
-        // a registered parent it'll follow up with hud:set-project-root.
+        // a registered parent it'll follow up with hud:set-project-root
+        // (and Glass now always sends one — null when not in a project, so
+        // the pill stays cleared on a new meeting too).
         const pill = document.getElementById('project-pill');
         if (pill) { pill.style.display = 'none'; pill.textContent = ''; }
       });

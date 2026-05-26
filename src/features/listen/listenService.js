@@ -185,6 +185,15 @@ class ListenService {
                         );
                     }
 
+                    // Always write sessions under a `meetings/` subfolder of
+                    // the user's chosen path. This (a) keeps the project root
+                    // clean (other project files live next to a single
+                    // meetings/ subdir, not scattered with session subdirs),
+                    // and (b) lets the HUD's path math always be
+                    // <chosenRoot>/meetings/<id>/. The brain sees the path
+                    // verbatim — it doesn't know or care about the convention.
+                    const brainMeetingsDir = path.join(meetingsDir, 'meetings');
+
                     // Notify the brain of the per-session meetings_dir override
                     // plus the project_root if detected. Best-effort: if the
                     // brain isn't connected yet the message is dropped, Glass
@@ -193,23 +202,27 @@ class ListenService {
                     try {
                         brainBridge.send('meeting.start', {
                             session_id: this.currentSessionId,
-                            meetings_dir: meetingsDir,
+                            meetings_dir: brainMeetingsDir,
                             project_root: projectCtx.project_root,
                             is_inside_project: projectCtx.is_inside_project,
                         });
-                        console.log('[ListenService] sent meeting.start to brain');
+                        console.log('[ListenService] sent meeting.start to brain (meetings_dir=' + brainMeetingsDir + ')');
                     } catch (e) {
                         console.warn('[ListenService] failed to send meeting.start to brain:', e.message);
                     }
 
                     // Tell the Insight HUD to switch its file watcher to the new dir.
+                    // The HUD appends `/meetings` itself, so we pass the
+                    // user-picked root (NOT brainMeetingsDir) here so both
+                    // sides end up watching the same `<chosen>/meetings/` dir.
                     // Pass project_root so the HUD can surface it in the title bar.
                     const hudWindow = windowPool.get('insight-hud');
                     if (hudWindow && !hudWindow.isDestroyed()) {
                         hudWindow.webContents.send('hud:set-meetings-root', meetingsDir);
-                        if (projectCtx.is_inside_project) {
-                            hudWindow.webContents.send('hud:set-project-root', projectCtx.project_root);
-                        }
+                        hudWindow.webContents.send(
+                            'hud:set-project-root',
+                            projectCtx.is_inside_project ? projectCtx.project_root : null,
+                        );
                     }
                     break;
 
