@@ -430,6 +430,53 @@ export class SettingsView extends LitElement {
             line-height: 1.4;
         }
 
+        /* S4.9 — audio devices section. Reuses preset-* class patterns for
+           the header / toggle; only the select itself needs custom CSS. */
+        .audio-devices-section {
+            padding: 6px 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .audio-devices-body {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .audio-device-row {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .audio-device-label {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.6);
+            margin-left: 2px;
+        }
+
+        .audio-device-select {
+            background: rgba(0, 0, 0, 0.4);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 3px;
+            padding: 4px 6px;
+            font-size: 11px;
+            font-family: inherit;
+            width: 100%;
+            cursor: pointer;
+        }
+
+        .audio-device-select:focus {
+            outline: none;
+            border-color: rgba(0, 122, 255, 0.5);
+        }
+
+        .audio-device-select option {
+            background: rgba(20, 20, 20, 1);
+            color: white;
+        }
+
         .loading-state {
             display: flex;
             align-items: center;
@@ -583,6 +630,10 @@ export class SettingsView extends LitElement {
         projectFolders: { type: Array, state: true },
         showProjectFolders: { type: Boolean, state: true },
         addingProjectFolder: { type: Boolean, state: true },
+        // S4.9 — selected mic input device
+        micDevices: { type: Array, state: true },
+        selectedMicId: { type: String, state: true },
+        showAudioDevices: { type: Boolean, state: true },
         autoUpdateEnabled: { type: Boolean, state: true },
         autoUpdateLoading: { type: Boolean, state: true },
         // Ollama related properties
@@ -617,6 +668,10 @@ export class SettingsView extends LitElement {
         this.projectFolders = [];
         this.showProjectFolders = false;
         this.addingProjectFolder = false;
+        // S4.9 — selected mic input device
+        this.micDevices = [];
+        this.selectedMicId = null;
+        this.showAudioDevices = false;
         // Ollama related
         this.ollamaStatus = { installed: false, running: false };
         this.ollamaModels = [];
@@ -696,6 +751,14 @@ export class SettingsView extends LitElement {
             this.presets = presets || [];
             this.projectFolders = projectFolders || []; // S4.7
             this.isContentProtectionOn = contentProtection;
+            // S4.9 — load saved mic id + enumerate available devices.
+            // enumerateDevices is renderer-only so it lives here.
+            try {
+                this.selectedMicId = await window.api.settingsView.getMicDeviceId();
+                await this.refreshMicDevices();
+            } catch (e) {
+                console.warn('[SettingsView] could not load audio devices:', e?.message);
+            }
             this.shortcuts = shortcuts || {};
             if (this.presets.length > 0) {
                 const firstUserPreset = this.presets.find(p => p.is_default === 0);
@@ -1008,6 +1071,41 @@ export class SettingsView extends LitElement {
         const normalized = p.replace(/\\/g, '/');
         const parts = normalized.split('/').filter(Boolean);
         return parts.length ? parts[parts.length - 1] : p;
+    }
+
+    // S4.9 — audio devices
+    toggleAudioDevices() {
+        this.showAudioDevices = !this.showAudioDevices;
+    }
+
+    async refreshMicDevices() {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            // Labels are only populated if the page has been granted mic
+            // permission at least once. Glass holds mic permission always,
+            // so this should work — but if not, the dropdown falls back to
+            // device IDs as labels.
+            this.micDevices = devices
+                .filter(d => d.kind === 'audioinput')
+                .map(d => ({
+                    deviceId: d.deviceId,
+                    label: d.label || `Microphone (${d.deviceId.slice(0, 6)}…)`,
+                }));
+            this.requestUpdate();
+        } catch (e) {
+            console.warn('[SettingsView] enumerateDevices failed:', e?.message);
+        }
+    }
+
+    async handleMicDeviceChange(event) {
+        const newId = event.target.value || null;
+        try {
+            await window.api.settingsView.setMicDeviceId(newId);
+            this.selectedMicId = newId;
+        } catch (e) {
+            console.error('[SettingsView] setMicDeviceId failed:', e);
+        }
+        this.requestUpdate();
     }
 
     connectedCallback() {
@@ -1597,6 +1695,34 @@ export class SettingsView extends LitElement {
                              ?disabled=${this.addingProjectFolder}
                              @click=${this.handleAddProjectFolder}>
                             ${this.addingProjectFolder ? 'Choosing…' : '+ Add folder'}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- S4.9 — Audio Devices (mic selection). -->
+                <div class="audio-devices-section">
+                    <div class="preset-header">
+                        <span class="preset-title">
+                            Audio Devices
+                        </span>
+                        <span class="preset-toggle" @click=${this.toggleAudioDevices}>
+                            ${this.showAudioDevices ? '▼' : '▶'}
+                        </span>
+                    </div>
+
+                    <div class="audio-devices-body ${this.showAudioDevices ? '' : 'hidden'}">
+                        <div class="audio-device-row">
+                            <span class="audio-device-label">Microphone</span>
+                            <select class="audio-device-select"
+                                    @change=${this.handleMicDeviceChange}
+                                    @focus=${() => this.refreshMicDevices()}>
+                                <option value="" ?selected=${!this.selectedMicId}>System default</option>
+                                ${this.micDevices.map(d => html`
+                                    <option value=${d.deviceId} ?selected=${this.selectedMicId === d.deviceId}>
+                                        ${d.label}
+                                    </option>
+                                `)}
+                            </select>
                         </div>
                     </div>
                 </div>

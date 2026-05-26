@@ -2,6 +2,7 @@
 const { ipcMain, app, dialog, BrowserWindow } = require('electron');
 const settingsService = require('../features/settings/settingsService');
 const projectFoldersStore = require('../features/settings/projectFoldersStore');
+const audioDevicesStore = require('../features/settings/audioDevicesStore');
 const authService = require('../features/common/services/authService');
 const whisperService = require('../features/common/services/whisperService');
 const ollamaService = require('../features/common/services/ollamaService');
@@ -111,6 +112,16 @@ module.exports = {
     ipcMain.handle('settings:removeProjectFolder', (event, dirPath) => {
         const updated = projectFoldersStore.remove(dirPath);
         _broadcastProjectFoldersUpdated(updated);
+        return updated;
+    });
+
+    // 2026-05-26 — S4.9 — mic device selection. Device enumeration itself
+    // happens in the renderer (navigator.mediaDevices.enumerateDevices()),
+    // we only persist the chosen ID here so it survives restarts.
+    ipcMain.handle('settings:getMicDeviceId', () => audioDevicesStore.getMicDeviceId());
+    ipcMain.handle('settings:setMicDeviceId', (event, deviceId) => {
+        const updated = audioDevicesStore.setMicDeviceId(deviceId);
+        _broadcastAudioDevicesUpdated(updated);
         return updated;
     });
 
@@ -238,6 +249,17 @@ function _broadcastProjectFoldersUpdated(folders) {
     for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) {
             win.webContents.send('settings:project-folders-updated', folders);
+        }
+    }
+}
+
+// 2026-05-26 — S4.9 helper: notify every window when the selected audio
+// devices change. listenCapture reads the latest value via preload IPC
+// at capture-start time so a settings change picks up on the next Listen.
+function _broadcastAudioDevicesUpdated(audioDevices) {
+    for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) {
+            win.webContents.send('settings:audio-devices-updated', audioDevices);
         }
     }
 }

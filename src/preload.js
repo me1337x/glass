@@ -220,6 +220,14 @@ contextBridge.exposeInMainWorld('api', {
     removeProjectFolder:  (dirPath) => ipcRenderer.invoke('settings:removeProjectFolder', dirPath),
     onProjectFoldersUpdated:        (cb) => ipcRenderer.on('settings:project-folders-updated', cb),
     removeOnProjectFoldersUpdated:  (cb) => ipcRenderer.removeListener('settings:project-folders-updated', cb),
+
+    // 2026-05-26 — S4.9 — mic device selection. Only the chosen ID is
+    // persisted; device enumeration is done in the renderer via
+    // navigator.mediaDevices.enumerateDevices().
+    getMicDeviceId:                ()         => ipcRenderer.invoke('settings:getMicDeviceId'),
+    setMicDeviceId:                (deviceId) => ipcRenderer.invoke('settings:setMicDeviceId', deviceId),
+    onAudioDevicesUpdated:         (cb)       => ipcRenderer.on('settings:audio-devices-updated', cb),
+    removeOnAudioDevicesUpdated:   (cb)       => ipcRenderer.removeListener('settings:audio-devices-updated', cb),
     getContentProtectionStatus: () => ipcRenderer.invoke('get-content-protection-status'),
     toggleContentProtection: () => ipcRenderer.invoke('toggle-content-protection'),
     getCurrentShortcuts: () => ipcRenderer.invoke('get-current-shortcuts'),

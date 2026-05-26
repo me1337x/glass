@@ -512,17 +512,50 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
 
             // 1. Get user's microphone
             try {
-                micMediaStream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        sampleRate: SAMPLE_RATE,
-                        channelCount: 1,
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true,
-                    },
-                    video: false,
-                });
-                console.log('Windows microphone capture started');
+                // 2026-05-26 — S4.9 — honour user-selected mic from Settings →
+                // Audio Devices. Null = system default (original behaviour).
+                // If the saved deviceId no longer matches any current device
+                // (e.g. user unplugged the headset), getUserMedia with
+                // `deviceId: { exact: ... }` throws OverconstrainedError;
+                // we catch + retry with the default device.
+                let savedMicId = null;
+                try {
+                    savedMicId = await window.api.settingsView.getMicDeviceId();
+                } catch (e) {
+                    console.warn('[Listen] could not read saved mic device id:', e?.message);
+                }
+
+                const baseAudio = {
+                    sampleRate: SAMPLE_RATE,
+                    channelCount: 1,
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                };
+                const audioConstraint = savedMicId
+                    ? { ...baseAudio, deviceId: { exact: savedMicId } }
+                    : baseAudio;
+
+                try {
+                    micMediaStream = await navigator.mediaDevices.getUserMedia({
+                        audio: audioConstraint,
+                        video: false,
+                    });
+                    if (savedMicId) {
+                        console.log(`Windows microphone capture started (deviceId=${savedMicId.slice(0, 12)}…)`);
+                    } else {
+                        console.log('Windows microphone capture started (system default)');
+                    }
+                } catch (constraintErr) {
+                    if (savedMicId && constraintErr?.name === 'OverconstrainedError') {
+                        console.warn(`[Listen] saved mic device ${savedMicId.slice(0, 12)}… not available, falling back to system default`);
+                        micMediaStream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio, video: false });
+                        console.log('Windows microphone capture started (fallback to default after OverconstrainedError)');
+                    } else {
+                        throw constraintErr;
+                    }
+                }
+
                 const { context, processor } = await setupMicProcessing(micMediaStream);
                 audioContext = context;
                 audioProcessor = processor;
