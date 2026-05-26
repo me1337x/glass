@@ -237,6 +237,12 @@ class ListenService {
                             });
                         } catch (_) { /* best-effort */ }
                     }
+                    // S6 (2026-05-27): tell the Listen renderer to stop its
+                    // screen-capture loop. Best-effort — renderer ignores
+                    // the signal if no capture is running.
+                    if (listenWindow && !listenWindow.isDestroyed()) {
+                        listenWindow.webContents.send('brain:stopScreenCapture');
+                    }
                     await this.closeSession();
                     listenWindow.webContents.send('session-state-changed', { isActive: false });
                     break;

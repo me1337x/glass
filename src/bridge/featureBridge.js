@@ -234,22 +234,30 @@ module.exports = {
     });
     ipcMain.handle('brain:sendScreenFrame', async (event, frameData) => {
         // Fire-and-forget to brain; drop silently if disconnected (frames are
-        // safe to lose — next 5s tick produces a fresh one).
+        // safe to lose — next 5s tick produces a fresh one). Main stamps
+        // session_id from listenService — same pattern as audio.frame.
         if (!brainBridge.connected) return { success: false, reason: 'brain_offline' };
+        const sessionId = listenService.currentSessionId;
+        if (!sessionId) return { success: false, reason: 'no_active_session' };
         try {
-            brainBridge.send('screen.frame', frameData);
+            brainBridge.send('screen.frame', {
+                ...frameData,
+                session_id: sessionId,
+            });
             return { success: true };
         } catch (e) {
             console.warn('[FeatureBridge] brain:sendScreenFrame send failed:', e.message);
             return { success: false, reason: 'send_error' };
         }
     });
-    ipcMain.handle('brain:notifyWindowPicked', async (event, { sessionId, captureWindowTitle, captureWindowId }) => {
+    ipcMain.handle('brain:notifyWindowPicked', async (event, { captureWindowTitle, captureWindowId }) => {
         // S6 (2026-05-27): renderer just resolved a window-picker selection.
         // Send a second meeting.start carrying just capture_window_title +
         // capture_window_id; brain's handle_meeting_start merges fields by
         // setdefault, so this just adds the title onto the existing config.
         if (!brainBridge.connected) return { success: false, reason: 'brain_offline' };
+        const sessionId = listenService.currentSessionId;
+        if (!sessionId) return { success: false, reason: 'no_active_session' };
         try {
             brainBridge.send('meeting.start', {
                 session_id: sessionId,

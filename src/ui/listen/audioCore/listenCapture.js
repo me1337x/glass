@@ -1,5 +1,15 @@
 const createAecModule = require('./aec.js');
 
+// S6 (2026-05-27): periodic screen capture loop. Fires from startCapture()
+// after audio is rolling; stops via the brain:stopScreenCapture IPC signal
+// from main on Stop click.
+const { startScreenCapture, stopScreenCapture } = require('../screenCore/screenCapture');
+if (window.api?.brain?.onStopScreenCapture) {
+    window.api.brain.onStopScreenCapture(() => {
+        stopScreenCapture();
+    });
+}
+
 let aecModPromise = null;     // 한 번만 로드
 let aecMod        = null;
 let aecPtr        = 0;        // Rust Aec* 1개만 재사용
@@ -618,6 +628,17 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
                 // Continue without system audio
             }
         }
+
+        // S6 (2026-05-27): after audio is rolling, fire off screen capture.
+        // Chromium's native picker shows now; cancel just means no frames
+        // for this session (audio continues unaffected). session_id is
+        // stamped on by featureBridge from listenService.currentSessionId,
+        // same as the audio path — renderer doesn't need to know it.
+        startScreenCapture().then((started) => {
+            if (!started) console.log('[listenCapture] screen capture not started (user cancel or error)');
+        }).catch((e) => {
+            console.warn('[listenCapture] startScreenCapture threw:', e.message);
+        });
     } catch (err) {
         console.error('Error starting capture:', err);
         // Note: pickleGlass.e() is not available in this context, commenting out
