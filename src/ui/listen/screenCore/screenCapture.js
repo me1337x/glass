@@ -1,14 +1,21 @@
 // glass-shell/src/ui/listen/screenCore/screenCapture.js
 //
-// S6 (2026-05-27): periodic screen capture. Mirrors audioCore/listenCapture.js
-// structure: get a media stream via getDisplayMedia, periodically sample
-// the video track onto a canvas, JPEG-encode, ship to brain via the main
-// process (which stamps session_id from listenService.currentSessionId).
+// S6 (2026-05-27): periodic screen capture for the brain's frame pipeline.
 //
-// Chromium's getDisplayMedia call shows the native picker — same one
-// Discord / browser screen-share use. We don't render our own picker UI;
-// the user picks from Chromium's chooser. The picked track's `label`
-// gives us the window title for capture_window_title.
+// Capture mechanism (revised after smoke test freeze):
+//   1. Ask main for the list of capture sources via brain.listCaptureWindows
+//      (wraps Electron's desktopCapturer.getSources).
+//   2. Auto-pick the primary screen (first 'screen' entry). A real picker
+//      UI is queued as an S6.1 follow-up.
+//   3. Call navigator.mediaDevices.getUserMedia with chromeMediaSource:
+//      'desktop' + chromeMediaSourceId. This is Electron's documented
+//      desktop-capture API and bypasses setDisplayMediaRequestHandler
+//      entirely (which was causing freezes with useSystemPicker: true).
+//   4. Every CAPTURE_INTERVAL_MS, draw the active video track onto a
+//      canvas, JPEG-encode, ship via brain.sendScreenFrame IPC.
+//
+// session_id is stamped on the screen.frame envelope by featureBridge from
+// listenService.currentSessionId — same as audio.frame.
 
 const CAPTURE_INTERVAL_MS = 5000;
 const JPEG_QUALITY = 0.8;
@@ -19,26 +26,6 @@ let canvasEl = null;
 let mediaStream = null;
 let intervalHandle = null;
 let started = false;
-
-/** Notify main when the user picks a window so meeting.start can be amended. */
-async function _notifyMainOfPick() {
-    if (!mediaStream) return;
-    const videoTracks = mediaStream.getVideoTracks();
-    if (videoTracks.length === 0) return;
-    const track = videoTracks[0];
-    const settings = track.getSettings ? track.getSettings() : {};
-    const captureWindowTitle = track.label || settings.displayLabel || null;
-    const captureWindowId = settings.deviceId || null;
-    try {
-        await window.api.brain.notifyWindowPicked({
-            captureWindowTitle,
-            captureWindowId,
-        });
-        console.log(`[ScreenCapture] notified main of picked window: ${captureWindowTitle}`);
-    } catch (e) {
-        console.warn('[ScreenCapture] notifyWindowPicked IPC failed:', e.message);
-    }
-}
 
 /** Draw the current frame on the canvas, JPEG-encode, ship via IPC. */
 async function _captureAndShip() {
@@ -98,11 +85,12 @@ function _arrayBufferToBase64(buf) {
 }
 
 /**
- * Start screen capture. Triggers Chromium's native window/screen picker.
- * If the user cancels, returns false and no capture runs.
+ * Start screen capture. Auto-picks the primary screen via
+ * desktopCapturer.getSources, then uses Electron's getUserMedia +
+ * chromeMediaSource desktop API.
  *
- * @returns {Promise<boolean>} true if capture started, false if user
- *   cancelled or capture failed.
+ * @returns {Promise<boolean>} true if capture started, false if no
+ *   source available or getUserMedia failed.
  */
 async function startScreenCapture() {
     if (started) {
@@ -110,19 +98,39 @@ async function startScreenCapture() {
         return true;
     }
 
+    // 1. Fetch source list via main process.
+    let sources;
     try {
-        // video: true → Chromium shows the native picker.
-        // No audio in this stream — audio is captured separately by listenCapture.
-        mediaStream = await navigator.mediaDevices.getDisplayMedia({
-            video: true,
+        sources = await window.api.brain.listCaptureWindows();
+    } catch (e) {
+        console.error('[ScreenCapture] listCaptureWindows IPC failed:', e);
+        return false;
+    }
+    if (!Array.isArray(sources) || sources.length === 0) {
+        console.error('[ScreenCapture] no capture sources returned');
+        return false;
+    }
+
+    // 2. Auto-pick: prefer the first 'screen' entry. Falls back to the
+    //    first source overall if no screen is found (very unusual — should
+    //    always have at least a primary screen).
+    const picked = sources.find((s) => s.kind === 'screen') || sources[0];
+    console.log(`[ScreenCapture] capturing source: ${picked.name} (${picked.id})`);
+
+    // 3. Capture via Electron's desktop-capture getUserMedia. This API
+    //    bypasses setDisplayMediaRequestHandler — no useSystemPicker hang.
+    try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
             audio: false,
+            video: {
+                mandatory: {
+                    chromeMediaSource: 'desktop',
+                    chromeMediaSourceId: picked.id,
+                },
+            },
         });
     } catch (e) {
-        if (e.name === 'NotAllowedError' || e.name === 'AbortError') {
-            console.log('[ScreenCapture] user cancelled the window picker');
-            return false;
-        }
-        console.error('[ScreenCapture] getDisplayMedia failed:', e);
+        console.error('[ScreenCapture] getUserMedia failed:', e);
         return false;
     }
 
@@ -134,7 +142,17 @@ async function startScreenCapture() {
     canvasEl = document.createElement('canvas');
 
     started = true;
-    await _notifyMainOfPick();
+
+    // 4. Notify main so meeting.start gets enriched with capture_window_title.
+    try {
+        await window.api.brain.notifyWindowPicked({
+            captureWindowTitle: picked.name,
+            captureWindowId: picked.id,
+        });
+        console.log(`[ScreenCapture] notified main: ${picked.name}`);
+    } catch (e) {
+        console.warn('[ScreenCapture] notifyWindowPicked failed:', e.message);
+    }
 
     intervalHandle = setInterval(_captureAndShip, CAPTURE_INTERVAL_MS);
     console.log(`[ScreenCapture] started (interval ${CAPTURE_INTERVAL_MS}ms)`);

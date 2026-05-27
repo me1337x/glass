@@ -174,31 +174,17 @@ app.whenReady().then(async () => {
 
     // Setup native loopback audio capture for Windows.
     //
-    // S6 (2026-05-27): this handler used to unconditionally auto-grant the
-    // first screen + loopback audio — fine for the audio-loopback path
-    // (the original purpose) but means video-only screen capture also
-    // silently got the first screen with NO picker, which broke S6's
-    // smoke test. Branch on request.audioRequested:
-    //   - audio requested (loopback path) → preserve existing auto-grant
-    //   - video only (S6 screen capture)  → useSystemPicker on Electron 30+
-    //     → OS native picker on Win11 / macOS 15+ (the same picker users
-    //     recognise from browser screen-share).
+    // This handler intercepts navigator.mediaDevices.getDisplayMedia calls.
+    // Glass's audio loopback uses getDisplayMedia({video: true, audio: true})
+    // and relies on the handler auto-granting sources[0] + 'loopback'.
     //
-    // If useSystemPicker isn't available on the user's OS (Win10), we fall
-    // back to the custom picker via windowPickerService.listCaptureWindows
-    // in a S6.1 follow-up.
+    // S6 (2026-05-27): screen capture does NOT go through getDisplayMedia.
+    // It uses navigator.mediaDevices.getUserMedia({chromeMediaSource: 'desktop',
+    // chromeMediaSourceId: <picked>}) which bypasses this handler entirely.
+    // That avoids the previous freeze: useSystemPicker: true hung the renderer
+    // on this rig (possibly because the OS native picker isn't fully
+    // supported here, possibly because of an Electron 30 Windows quirk).
     session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
-        console.log(
-            `[DisplayMedia] request: audioRequested=${request.audioRequested}, ` +
-            `videoRequested=${request.videoRequested}`,
-        );
-        if (!request.audioRequested) {
-            // Video-only — S6 screen capture path. Delegate to the OS picker.
-            console.log('[DisplayMedia] video-only — using useSystemPicker (S6)');
-            callback({ useSystemPicker: true });
-            return;
-        }
-        // Audio loopback path — preserve original behaviour.
         desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
             // Grant access to the first screen found with loopback audio
             callback({ video: sources[0], audio: 'loopback' });
