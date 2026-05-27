@@ -629,16 +629,20 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
             }
         }
 
-        // S6 (2026-05-27): after audio is rolling, fire off screen capture.
-        // Chromium's native picker shows now; cancel just means no frames
-        // for this session (audio continues unaffected). session_id is
-        // stamped on by featureBridge from listenService.currentSessionId,
-        // same as the audio path — renderer doesn't need to know it.
-        startScreenCapture().then((started) => {
-            if (!started) console.log('[listenCapture] screen capture not started (user cancel or error)');
-        }).catch((e) => {
-            console.warn('[listenCapture] startScreenCapture threw:', e.message);
-        });
+        // S6 (2026-05-27): screen capture kickoff is DISABLED while we
+        // diagnose a Listen-click freeze reported during smoke. Set
+        // window.glass.s6ScreenCaptureEnabled = true in DevTools (or
+        // ship a follow-up enabling it) once the freeze is understood.
+        // The audio path above works regardless.
+        if (window.glass?.s6ScreenCaptureEnabled === true) {
+            startScreenCapture().then((started) => {
+                if (!started) console.log('[listenCapture] screen capture not started (user cancel or error)');
+            }).catch((e) => {
+                console.warn('[listenCapture] startScreenCapture threw:', e.message);
+            });
+        } else {
+            console.log('[listenCapture] screen capture disabled (set window.glass.s6ScreenCaptureEnabled=true to enable)');
+        }
     } catch (err) {
         console.error('Error starting capture:', err);
         // Note: pickleGlass.e() is not available in this context, commenting out
