@@ -303,6 +303,15 @@ contextBridge.exposeInMainWorld('api', {
     sendScreenFrame: (data) => ipcRenderer.invoke('brain:sendScreenFrame', data),
     notifyWindowPicked: (data) => ipcRenderer.invoke('brain:notifyWindowPicked', data),
     onStopScreenCapture: (callback) => ipcRenderer.on('brain:stopScreenCapture', callback),
+
+    // S6.1 (2026-05-27): screen-capture-source picker IPC.
+    // pickerConfirm / pickerCancel are called by the picker.html renderer
+    // to resolve the pickCaptureSource promise on the main side.
+    // getActiveCaptureSource is called by screenCapture.js to look up
+    // which source the user picked for the current Listen session.
+    pickerConfirm: (data) => ipcRenderer.invoke('brain:pickerConfirm', data),
+    pickerCancel: () => ipcRenderer.invoke('brain:pickerCancel'),
+    getActiveCaptureSource: () => ipcRenderer.invoke('brain:getActiveCaptureSource'),
   },
 
   // src/ui/listen/audioCore/renderer.js

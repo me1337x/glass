@@ -85,12 +85,15 @@ function _arrayBufferToBase64(buf) {
 }
 
 /**
- * Start screen capture. Auto-picks the primary screen via
- * desktopCapturer.getSources, then uses Electron's getUserMedia +
- * chromeMediaSource desktop API.
+ * Start screen capture. Uses the source the user picked in the modal
+ * (listenService.activeCaptureSource, read via brain:getActiveCaptureSource).
+ * If the user cancelled the picker, this returns false silently and no
+ * screen capture happens for this meeting (audio-only).
+ *
+ * Uses Electron's getUserMedia + chromeMediaSource desktop API.
  *
  * @returns {Promise<boolean>} true if capture started, false if no
- *   source available or getUserMedia failed.
+ *   source picked, source unavailable, or getUserMedia failed.
  */
 async function startScreenCapture() {
     if (started) {
@@ -98,23 +101,19 @@ async function startScreenCapture() {
         return true;
     }
 
-    // 1. Fetch source list via main process.
-    let sources;
+    // 1. Read the user's pick from listenService (via main IPC).
+    let picked;
     try {
-        sources = await window.api.brain.listCaptureWindows();
+        picked = await window.api.brain.getActiveCaptureSource();
     } catch (e) {
-        console.error('[ScreenCapture] listCaptureWindows IPC failed:', e);
+        console.error('[ScreenCapture] getActiveCaptureSource IPC failed:', e);
         return false;
     }
-    if (!Array.isArray(sources) || sources.length === 0) {
-        console.error('[ScreenCapture] no capture sources returned');
+    if (!picked || !picked.id) {
+        // Picker was cancelled — audio-only meeting. Not an error.
+        console.log('[ScreenCapture] no capture source picked — skipping screen capture this meeting');
         return false;
     }
-
-    // 2. Auto-pick: prefer the first 'screen' entry. Falls back to the
-    //    first source overall if no screen is found (very unusual — should
-    //    always have at least a primary screen).
-    const picked = sources.find((s) => s.kind === 'screen') || sources[0];
     console.log(`[ScreenCapture] capturing source: ${picked.name} (${picked.id})`);
 
     // 3. Capture via Electron's desktop-capture getUserMedia. This API

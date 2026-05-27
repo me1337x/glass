@@ -9,6 +9,7 @@ const sttRepository = require('./stt/repositories');
 const internalBridge = require('../../bridge/internalBridge');
 const brainBridge = require('../../brain-bridge');
 const projectFoldersStore = require('../settings/projectFoldersStore');
+const { pickCaptureSource } = require('./screenCapturePicker');
 const { EVENTS } = internalBridge;
 
 // 2026-05-26: per-session meeting-folder picker. The user picks where to
@@ -62,6 +63,11 @@ class ListenService {
         this.summaryService = new SummaryService();
         this.currentSessionId = null;
         this.isInitializingSession = false;
+        // S6.1 (2026-05-27): set by handleListenRequest after the user picks
+        // a capture source in the picker modal. Read by screenCapture.js
+        // (via the brain:getActiveCaptureSource IPC) when starting capture.
+        // null = picker was cancelled (audio-only meeting).
+        this.activeCaptureSource = null;
 
         this.setupServiceCallbacks();
         console.log('[ListenService] Service instance created.');
@@ -169,6 +175,22 @@ class ListenService {
                     }
                     console.log(`[ListenService] meetings dir for this session: ${meetingsDir}`);
 
+                    // S6.1 (2026-05-27): pick the screen-capture source.
+                    // Cancel here is OK — meeting still proceeds, just without
+                    // screen capture (audio-only). Audio is the primary value.
+                    let captureSource = null;
+                    try {
+                        captureSource = await pickCaptureSource(header);
+                        if (captureSource) {
+                            console.log(`[ListenService] capture source: ${captureSource.name} (${captureSource.id})`);
+                        } else {
+                            console.log('[ListenService] capture picker cancelled — audio-only meeting');
+                        }
+                    } catch (e) {
+                        console.warn('[ListenService] capture picker failed, falling back to audio-only:', e.message);
+                    }
+                    this.activeCaptureSource = captureSource;
+
                     internalBridge.emit('request-window-visibility', { name: 'listen', visible: true });
                     await this.initializeSession();
                     listenWindow.webContents.send('session-state-changed', { isActive: true });
@@ -243,6 +265,9 @@ class ListenService {
                     if (listenWindow && !listenWindow.isDestroyed()) {
                         listenWindow.webContents.send('brain:stopScreenCapture');
                     }
+                    // S6.1: clear the per-session picked source so the next
+                    // Listen click starts from a fresh state.
+                    this.activeCaptureSource = null;
                     await this.closeSession();
                     listenWindow.webContents.send('session-state-changed', { isActive: false });
                     break;

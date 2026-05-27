@@ -250,6 +250,13 @@ module.exports = {
             return { success: false, reason: 'send_error' };
         }
     });
+    ipcMain.handle('brain:getActiveCaptureSource', async () => {
+        // S6.1 (2026-05-27): screenCapture.js calls this on Listen start to
+        // discover which source the user picked in the modal. Returns null
+        // if the user cancelled the picker (audio-only meeting) — screen
+        // capture should not run in that case.
+        return listenService.activeCaptureSource || null;
+    });
     ipcMain.handle('brain:notifyWindowPicked', async (event, { captureWindowTitle, captureWindowId }) => {
         // S6 (2026-05-27): renderer just resolved a window-picker selection.
         // Send a second meeting.start carrying just capture_window_title +
