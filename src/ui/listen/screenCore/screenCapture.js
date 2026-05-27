@@ -18,7 +18,13 @@
 // listenService.currentSessionId — same as audio.frame.
 
 const CAPTURE_INTERVAL_MS = 5000;
-const JPEG_QUALITY = 0.8;
+// S6.2 (2026-05-27): switched from JPEG to PNG. PNG is lossless and
+// preserves the sharp edges of name-plate text + UI labels that Sonnet
+// vision will OCR in S6.5. Screenshots also compress well in PNG
+// (large flat-color regions + crisp text — exactly what deflate is good
+// at), so file size is reasonable (~100-200 KB per kept frame).
+const FRAME_FORMAT = 'png';
+const FRAME_MIME = 'image/png';
 const TARGET_MAX_DIMENSION = 1920; // downscale if either dim > this; saves bandwidth
 
 let videoEl = null;
@@ -50,8 +56,9 @@ async function _captureAndShip() {
     const ctx = canvasEl.getContext('2d');
     ctx.drawImage(videoEl, 0, 0, cw, ch);
 
-    // canvas.toBlob is async + spec-stable. Wrap in a Promise.
-    const blob = await new Promise((resolve) => canvasEl.toBlob(resolve, 'image/jpeg', JPEG_QUALITY));
+    // canvas.toBlob is async + spec-stable. Wrap in a Promise. PNG ignores
+    // the quality argument so we omit it.
+    const blob = await new Promise((resolve) => canvasEl.toBlob(resolve, FRAME_MIME));
     if (!blob) {
         console.warn('[ScreenCapture] toBlob returned null — skipping this frame');
         return;
@@ -62,10 +69,9 @@ async function _captureAndShip() {
     try {
         // session_id is stamped on by featureBridge using listenService.currentSessionId.
         await window.api.brain.sendScreenFrame({
-            format: 'jpeg',
+            format: FRAME_FORMAT,
             width: cw,
             height: ch,
-            quality: Math.round(JPEG_QUALITY * 100),
             payload_b64: b64,
         });
     } catch (e) {
