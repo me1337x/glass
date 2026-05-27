@@ -629,19 +629,22 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
             }
         }
 
-        // S6 (2026-05-27): screen capture kickoff is DISABLED while we
-        // diagnose a Listen-click freeze reported during smoke. Set
-        // window.glass.s6ScreenCaptureEnabled = true in DevTools (or
-        // ship a follow-up enabling it) once the freeze is understood.
-        // The audio path above works regardless.
-        if (window.glass?.s6ScreenCaptureEnabled === true) {
+        // S6 (2026-05-27): after audio is rolling, fire off screen capture.
+        // Auto-picks the primary screen via desktopCapturer.getSources +
+        // navigator.mediaDevices.getUserMedia (Electron's documented
+        // desktop-capture API — bypasses setDisplayMediaRequestHandler
+        // entirely, which was the freeze culprit in the earlier attempt).
+        // To disable for diagnostic purposes: in the Listen window's
+        // DevTools, set window.glass.s6ScreenCaptureDisabled = true
+        // BEFORE clicking Listen.
+        if (window.glass?.s6ScreenCaptureDisabled === true) {
+            console.log('[listenCapture] screen capture disabled by window.glass.s6ScreenCaptureDisabled');
+        } else {
             startScreenCapture().then((started) => {
                 if (!started) console.log('[listenCapture] screen capture not started (user cancel or error)');
             }).catch((e) => {
                 console.warn('[listenCapture] startScreenCapture threw:', e.message);
             });
-        } else {
-            console.log('[listenCapture] screen capture disabled (set window.glass.s6ScreenCaptureEnabled=true to enable)');
         }
     } catch (err) {
         console.error('Error starting capture:', err);
