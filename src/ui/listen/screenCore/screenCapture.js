@@ -22,10 +22,16 @@ const CAPTURE_INTERVAL_MS = 5000;
 // preserves the sharp edges of name-plate text + UI labels that Sonnet
 // vision will OCR in S6.5. Screenshots also compress well in PNG
 // (large flat-color regions + crisp text — exactly what deflate is good
-// at), so file size is reasonable (~100-200 KB per kept frame).
+// at), so file size is reasonable.
 const FRAME_FORMAT = 'png';
 const FRAME_MIME = 'image/png';
-const TARGET_MAX_DIMENSION = 1920; // downscale if either dim > this; saves bandwidth
+// S6.3 (2026-05-27): bumped from 1920 to 3840. The 1920 cap was halving
+// effective resolution on high-DPI displays (Teams rendering at 2560-2880
+// natively → downscaled to 1920 → participant name plates went from
+// ~15px tall to ~10px, near unreadable). At 3840 we preserve native
+// pixels for typical 4K rigs while still capping monstrous setups.
+// PNG of a 4K screenshot is ~1-1.5 MB; dedup keeps frame count low.
+const TARGET_MAX_DIMENSION = 3840;
 
 let videoEl = null;
 let canvasEl = null;
