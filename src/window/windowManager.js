@@ -590,7 +590,17 @@ function createFeatureWindows(header, namesToCreate) {
         createFeatureWindow('listen');
         createFeatureWindow('ask');
         createFeatureWindow('settings');
-        createFeatureWindow('insight-hud');  // S4.5 stage 3 — spike-only
+        // S4.5 spike HUD — alwaysOnTop, frameless, no taskbar entry, hard
+        // to dismiss. Disabled by default 2026-05-27 because it gets in
+        // the way during testing AND Glass already has a native insights
+        // panel (ListenView's transcript/insight toggle → SummaryView).
+        // Long-term plan (S9): route brain summary/actions into the
+        // native SummaryView and retire this HUD entirely.
+        // To re-enable for spike-style verification, set
+        // ENABLE_INSIGHT_HUD=1 in the env before launching dev.ps1.
+        if (process.env.ENABLE_INSIGHT_HUD === '1') {
+            createFeatureWindow('insight-hud');
+        }
     }
 }
 
