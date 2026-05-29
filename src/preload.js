@@ -176,7 +176,12 @@ contextBridge.exposeInMainWorld('api', {
     // Listeners
     onSummaryUpdate: (callback) => ipcRenderer.on('summary-update', callback),
     removeOnSummaryUpdate: (callback) => ipcRenderer.removeListener('summary-update', callback),
-    removeAllSummaryUpdateListeners: () => ipcRenderer.removeAllListeners('summary-update')
+    removeAllSummaryUpdateListeners: () => ipcRenderer.removeAllListeners('summary-update'),
+
+    // S9 (ADR-013): brain per-meeting files pushed from the main process
+    // (meetingFilesService) feed the native Live Insights panel.
+    onMeetingFilesUpdate: (callback) => ipcRenderer.on('meeting-files-update', callback),
+    removeAllMeetingFilesUpdateListeners: () => ipcRenderer.removeAllListeners('meeting-files-update')
   },
 
   // src/ui/settings/SettingsView.js

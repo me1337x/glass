@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const SttService = require('./stt/sttService');
 const SummaryService = require('./summary/summaryService');
+const MeetingFilesService = require('./summary/meetingFilesService');
 const authService = require('../common/services/authService');
 const sessionRepository = require('../common/repositories/session');
 const sttRepository = require('./stt/repositories');
@@ -61,6 +62,8 @@ class ListenService {
     constructor() {
         this.sttService = new SttService();
         this.summaryService = new SummaryService();
+        // S9 (ADR-013): pushes brain per-meeting files to the Live Insights panel.
+        this.meetingFilesService = new MeetingFilesService();
         this.currentSessionId = null;
         this.isInitializingSession = false;
         // S6.1 (2026-05-27): set by handleListenRequest after the user picks
@@ -246,6 +249,11 @@ class ListenService {
                             projectCtx.is_inside_project ? projectCtx.project_root : null,
                         );
                     }
+
+                    // S9 (ADR-013): feed the native Live Insights panel
+                    // (SummaryView) from the brain's per-meeting files — same
+                    // <chosen>/meetings/ root the HUD watches.
+                    this.meetingFilesService.start(meetingsDir);
                     break;
 
                 case 'Stop':
@@ -464,6 +472,8 @@ class ListenService {
             // Reset state
             this.currentSessionId = null;
             this.summaryService.resetConversationHistory();
+            // S9 (ADR-013): stop pushing brain-file updates to Live Insights.
+            this.meetingFilesService.stop();
 
             console.log('Listen service session closed.');
             return { success: true };

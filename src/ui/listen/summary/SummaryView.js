@@ -189,6 +189,15 @@ export class SummaryView extends LitElement {
             transform: translateX(2px);
         }
 
+        /* S9: file sections are read-only (not click-to-Ask) — no hover affordance. */
+        .file-section {
+            cursor: default;
+        }
+        .file-section:hover {
+            background: transparent;
+            transform: none;
+        }
+
         .markdown-content p {
             margin: 4px 0;
         }
@@ -234,19 +243,28 @@ export class SummaryView extends LitElement {
     `;
 
     static properties = {
-        structuredData: { type: Object },
+        meetingFiles: { type: Object },
         isVisible: { type: Boolean },
         hasCompletedRecording: { type: Boolean },
     };
 
+    // S9 (ADR-013): the brain's per-meeting files, in display order.
+    // [stateKey, sectionTitle]; stateKey matches meetingFilesService keys.
+    static SECTIONS = [
+        ['summary', 'Summary'],
+        ['actions', 'Action items'],
+        ['decisions', 'Decisions'],
+        ['timeline', 'Timeline'],
+        ['suggestions', 'Suggestions'],
+        ['roster', 'Speaker roster'],
+        ['visualContext', 'Visual context'],
+        ['advisor', 'Advisor'],
+    ];
+
     constructor() {
         super();
-        this.structuredData = {
-            summary: [],
-            topic: { header: '', bullets: [] },
-            actions: [],
-            followUps: [],
-        };
+        this.meetingFiles = {};
+        this.meetingName = null;
         this.isVisible = true;
         this.hasCompletedRecording = false;
 
@@ -263,8 +281,11 @@ export class SummaryView extends LitElement {
     connectedCallback() {
         super.connectedCallback();
         if (window.api) {
-            window.api.summaryView.onSummaryUpdate((event, data) => {
-                this.structuredData = data;
+            // S9 (ADR-013): render the brain's per-meeting files pushed from
+            // the main process (meetingFilesService) — not LLM analysis.
+            window.api.summaryView.onMeetingFilesUpdate((event, data) => {
+                this.meetingFiles = (data && data.files) || {};
+                this.meetingName = (data && data.meetingName) || null;
                 this.requestUpdate();
             });
         }
@@ -273,18 +294,14 @@ export class SummaryView extends LitElement {
     disconnectedCallback() {
         super.disconnectedCallback();
         if (window.api) {
-            window.api.summaryView.removeAllSummaryUpdateListeners();
+            window.api.summaryView.removeAllMeetingFilesUpdateListeners();
         }
     }
 
     // Handle session reset from parent
     resetAnalysis() {
-        this.structuredData = {
-            summary: [],
-            topic: { header: '', bullets: [] },
-            actions: [],
-            followUps: [],
-        };
+        this.meetingFiles = {};
+        this.meetingName = null;
         this.requestUpdate();
     }
 
@@ -422,25 +439,14 @@ export class SummaryView extends LitElement {
     }
 
     getSummaryText() {
-        const data = this.structuredData || { summary: [], topic: { header: '', bullets: [] }, actions: [] };
-        let sections = [];
-
-        if (data.summary && data.summary.length > 0) {
-            sections.push(`Current Summary:\n${data.summary.map(s => `• ${s}`).join('\n')}`);
+        const files = this.meetingFiles || {};
+        const sections = [];
+        for (const [key, title] of SummaryView.SECTIONS) {
+            const content = files[key];
+            if (content && content.trim()) {
+                sections.push(`## ${title}\n\n${content.trim()}`);
+            }
         }
-
-        if (data.topic && data.topic.header && data.topic.bullets.length > 0) {
-            sections.push(`\n${data.topic.header}:\n${data.topic.bullets.map(b => `• ${b}`).join('\n')}`);
-        }
-
-        if (data.actions && data.actions.length > 0) {
-            sections.push(`\nActions:\n${data.actions.map(a => `▸ ${a}`).join('\n')}`);
-        }
-
-        if (data.followUps && data.followUps.length > 0) {
-            sections.push(`\nFollow-Ups:\n${data.followUps.map(f => `▸ ${f}`).join('\n')}`);
-        }
-
         return sections.join('\n\n').trim();
     }
 
@@ -454,92 +460,25 @@ export class SummaryView extends LitElement {
             return html`<div style="display: none;"></div>`;
         }
 
-        const data = this.structuredData || {
-            summary: [],
-            topic: { header: '', bullets: [] },
-            actions: [],
-        };
-
-        const hasAnyContent = data.summary.length > 0 || data.topic.bullets.length > 0 || data.actions.length > 0;
+        const files = this.meetingFiles || {};
+        const present = SummaryView.SECTIONS.filter(([key]) => files[key] && files[key].trim());
 
         return html`
             <div class="insights-container">
-                ${!hasAnyContent
+                ${present.length === 0
                     ? html`<div class="empty-state">No insights yet...</div>`
-                    : html`
-                        <insights-title>Current Summary</insights-title>
-                        ${data.summary.length > 0
-                            ? data.summary
-                                  .slice(0, 5)
-                                  .map(
-                                      (bullet, index) => html`
-                                          <div
-                                              class="markdown-content"
-                                              data-markdown-id="summary-${index}"
-                                              data-original-text="${bullet}"
-                                              @click=${() => this.handleMarkdownClick(bullet)}
-                                          >
-                                              ${bullet}
-                                          </div>
-                                      `
-                                  )
-                            : html` <div class="request-item">No content yet...</div> `}
-                        ${data.topic.header
-                            ? html`
-                                  <insights-title>${data.topic.header}</insights-title>
-                                  ${data.topic.bullets
-                                      .slice(0, 3)
-                                      .map(
-                                          (bullet, index) => html`
-                                              <div
-                                                  class="markdown-content"
-                                                  data-markdown-id="topic-${index}"
-                                                  data-original-text="${bullet}"
-                                                  @click=${() => this.handleMarkdownClick(bullet)}
-                                              >
-                                                  ${bullet}
-                                              </div>
-                                          `
-                                      )}
-                              `
-                            : ''}
-                        ${data.actions.length > 0
-                            ? html`
-                                  <insights-title>Actions</insights-title>
-                                  ${data.actions
-                                      .slice(0, 5)
-                                      .map(
-                                          (action, index) => html`
-                                              <div
-                                                  class="markdown-content"
-                                                  data-markdown-id="action-${index}"
-                                                  data-original-text="${action}"
-                                                  @click=${() => this.handleMarkdownClick(action)}
-                                              >
-                                                  ${action}
-                                              </div>
-                                          `
-                                      )}
-                              `
-                            : ''}
-                        ${this.hasCompletedRecording && data.followUps && data.followUps.length > 0
-                            ? html`
-                                  <insights-title>Follow-Ups</insights-title>
-                                  ${data.followUps.map(
-                                      (followUp, index) => html`
-                                          <div
-                                              class="markdown-content"
-                                              data-markdown-id="followup-${index}"
-                                              data-original-text="${followUp}"
-                                              @click=${() => this.handleMarkdownClick(followUp)}
-                                          >
-                                              ${followUp}
-                                          </div>
-                                      `
-                                  )}
-                              `
-                            : ''}
-                    `}
+                    : present.map(
+                          ([key, title]) => html`
+                              <insights-title>${title}</insights-title>
+                              <div
+                                  class="markdown-content file-section"
+                                  data-markdown-id="file-${key}"
+                                  data-original-text="${files[key]}"
+                              >
+                                  ${files[key]}
+                              </div>
+                          `
+                      )}
             </div>
         `;
     }

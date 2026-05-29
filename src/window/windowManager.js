@@ -594,8 +594,10 @@ function createFeatureWindows(header, namesToCreate) {
         // to dismiss. Disabled by default 2026-05-27 because it gets in
         // the way during testing AND Glass already has a native insights
         // panel (ListenView's transcript/insight toggle → SummaryView).
-        // Long-term plan (S9): route brain summary/actions into the
-        // native SummaryView and retire this HUD entirely.
+        // S9 (2026-05-30, ADR-013): the native SummaryView now renders the
+        // brain's per-meeting files (via meetingFilesService), so this HUD is
+        // redundant. Kept only as a gated fallback pending deletion once the
+        // native panel is verified in a real meeting.
         // To re-enable for spike-style verification, set
         // ENABLE_INSIGHT_HUD=1 in the env before launching dev.ps1.
         if (process.env.ENABLE_INSIGHT_HUD === '1') {
