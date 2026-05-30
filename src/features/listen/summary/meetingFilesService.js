@@ -95,7 +95,7 @@ class MeetingFilesService {
      * listenService: it sends the brain `path.join(meetingsDir, 'meetings')`).
      */
     start(chosenRoot) {
-        this.stop();
+        this._teardown();
         this.meetingsRoot = path.join(chosenRoot, 'meetings');
         console.log(`[MeetingFilesService] watching ${this.meetingsRoot}`);
         this._tick();
@@ -142,7 +142,21 @@ class MeetingFilesService {
         this._watched = [];
     }
 
+    // Meeting stopped (user pressed Stop). Stop hunting for new meeting dirs,
+    // but KEEP the file watchers alive and DO NOT clear the panel: the user
+    // reviews the insights after the meeting, and the end-of-meeting
+    // reconciler may rewrite summary.md / actions.md with final speaker names,
+    // which should still flow to the panel. The panel is reset by ListenView
+    // (summaryView.resetAnalysis) when the NEXT session starts.
     stop() {
+        if (this._rescan) {
+            clearInterval(this._rescan);
+            this._rescan = null;
+        }
+    }
+
+    // Full teardown — used when switching to a new meeting (via start()).
+    _teardown() {
         if (this._rescan) {
             clearInterval(this._rescan);
             this._rescan = null;
@@ -150,8 +164,6 @@ class MeetingFilesService {
         this._unwatchAll();
         this.currentDir = null;
         this.meetingsRoot = null;
-        // Clear stale content in the renderer on session end.
-        this.sendToRenderer('meeting-files-update', { meetingName: null, files: {} });
     }
 }
 
