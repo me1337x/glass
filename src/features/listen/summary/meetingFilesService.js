@@ -73,6 +73,27 @@ function readMeetingFiles(meetingDir) {
     return out;
 }
 
+/**
+ * Parse the `## Confirmed` section of roster.md into a { spk_N: name } map.
+ * Only high-confidence Confirmed mappings are surfaced — tentative/unknown are
+ * ignored so the live transcript label only upgrades to a real name once
+ * Agent F is sure. Lines look like:
+ *   - **spk_2 → Alice Chen** (confidence: high, 7 co-occurrences)
+ */
+function parseConfirmedSpeakers(rosterMd) {
+    const out = {};
+    if (!rosterMd) return out;
+    const confirmed = rosterMd.split(/^##\s+/m).find(s => /^Confirmed\b/i.test(s));
+    if (!confirmed) return out;
+    const re = /\*\*\s*(spk_\d+)\s*(?:→|->)\s*([^*]+?)\s*\*\*/g;
+    let m;
+    while ((m = re.exec(confirmed)) !== null) {
+        const name = m[2].trim();
+        if (name) out[m[1]] = name;
+    }
+    return out;
+}
+
 class MeetingFilesService {
     constructor() {
         this.meetingsRoot = null;
@@ -129,6 +150,9 @@ class MeetingFilesService {
             meetingName: this.currentDir.name,
             files,
         });
+        // S9: publish the confirmed spk_N -> name map so the live transcript
+        // view can label speakers (it falls back to raw spk_N when empty).
+        this.sendToRenderer('speaker-names-update', parseConfirmedSpeakers(files.roster));
     }
 
     _unwatchAll() {
@@ -170,4 +194,5 @@ class MeetingFilesService {
 module.exports = MeetingFilesService;
 module.exports.findNewestMeetingDir = findNewestMeetingDir;
 module.exports.readMeetingFiles = readMeetingFiles;
+module.exports.parseConfirmedSpeakers = parseConfirmedSpeakers;
 module.exports.MEETING_FILES = MEETING_FILES;

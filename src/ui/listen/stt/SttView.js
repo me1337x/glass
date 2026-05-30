@@ -67,6 +67,13 @@ export class SttView extends LitElement {
             margin-left: auto;
         }
 
+        .speaker-label {
+            font-size: 11px;
+            font-weight: 600;
+            opacity: 0.65;
+            margin-bottom: 2px;
+        }
+
         .empty-state {
             display: flex;
             align-items: center;
@@ -81,12 +88,17 @@ export class SttView extends LitElement {
     static properties = {
         sttMessages: { type: Array },
         isVisible: { type: Boolean },
+        speakerNames: { type: Object },
     };
 
     constructor() {
         super();
         this.sttMessages = [];
         this.isVisible = true;
+        // S9: spk_N -> confirmed real name, pushed from meetingFilesService as
+        // Agent F builds roster.md. Empty until a name is confirmed; the live
+        // view falls back to the raw spk_N / Me label in the meantime.
+        this.speakerNames = {};
         this.messageIdCounter = 0;
         this._shouldScrollAfterUpdate = false;
 
@@ -97,6 +109,12 @@ export class SttView extends LitElement {
         super.connectedCallback();
         if (window.api) {
             window.api.sttView.onSttUpdate(this.handleSttUpdate);
+            // S9: live speaker-name map parsed from roster.md (confirmed
+            // mappings). Updates labels on existing + future lines.
+            window.api.sttView.onSpeakerNamesUpdate((event, names) => {
+                this.speakerNames = names || {};
+                this.requestUpdate();
+            });
         }
     }
 
@@ -104,12 +122,14 @@ export class SttView extends LitElement {
         super.disconnectedCallback();
         if (window.api) {
             window.api.sttView.removeOnSttUpdate(this.handleSttUpdate);
+            window.api.sttView.removeAllSpeakerNamesUpdateListeners();
         }
     }
 
     // Handle session reset from parent
     resetTranscript() {
         this.sttMessages = [];
+        this.speakerNames = {};
         this.requestUpdate();
     }
 
@@ -188,8 +208,12 @@ export class SttView extends LitElement {
         return speaker.toLowerCase() === 'me' ? 'me' : 'them';
     }
 
+    displayName(speaker) {
+        return this.speakerNames[speaker] || speaker;
+    }
+
     getTranscriptText() {
-        return this.sttMessages.map(msg => `${msg.speaker}: ${msg.text}`).join('\n');
+        return this.sttMessages.map(msg => `${this.displayName(msg.speaker)}: ${msg.text}`).join('\n');
     }
 
     updated(changedProperties) {
@@ -214,6 +238,7 @@ export class SttView extends LitElement {
                     ? html`<div class="empty-state">Waiting for speech...</div>`
                     : this.sttMessages.map(msg => html`
                         <div class="stt-message ${this.getSpeakerClass(msg.speaker)}">
+                            <div class="speaker-label">${this.displayName(msg.speaker)}</div>
                             ${msg.text}
                         </div>
                     `)

@@ -165,7 +165,12 @@ contextBridge.exposeInMainWorld('api', {
   sttView: {
     // Listeners
     onSttUpdate: (callback) => ipcRenderer.on('stt-update', callback),
-    removeOnSttUpdate: (callback) => ipcRenderer.removeListener('stt-update', callback)
+    removeOnSttUpdate: (callback) => ipcRenderer.removeListener('stt-update', callback),
+
+    // S9: live speaker-name map (spk_N -> confirmed real name) parsed from
+    // roster.md, so the transcript view can label speakers.
+    onSpeakerNamesUpdate: (callback) => ipcRenderer.on('speaker-names-update', callback),
+    removeAllSpeakerNamesUpdateListeners: () => ipcRenderer.removeAllListeners('speaker-names-update')
   },
 
   // src/ui/listen/summary/SummaryView.js
